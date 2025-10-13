@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Fantasy Hockey Weekly Recap</title>
+  <style>
+    body {
+      font-family: "Inter", sans-serif;
+      background-color: #f8f6f1; /* Creamy page background */
+      color: #1c1c1c;
+      margin: 0;
+      padding: 0;
+      line-height: 1.6;
+    }
+
+    /* HEADER – clean, modern */
+    header {
+      text-align: center;
+      padding: 20px 20px 35px;
+      background: #ffffff;
+      border-top: 6px solid #c62828; /* Softer red */
+      border-bottom: 6px solid #004aad;
+      color: #0d1b2a;
+    }
+
+    header h1 {
+      font-family: 'Oswald', sans-serif;
+      font-size: 2.8rem;
+      margin-bottom: 8px;
+      color: #002b5b;
+    }
+
+    header p {
+      font-size: 1.1rem;
+      color: #444;
+    }
+
+    /* MAIN SECTIONS */
+    .section {
+      max-width: 1000px;
+      margin: 45px auto;
+      padding: 35px;
+      background: #012e5f; /* Light blue background */
+      border-radius: 16px;
+      border: 2px solid #c62828; /* Keep red border for contrast */
+      box-shadow: 0 4px 10px rgba(0, 0, 0, 0.06);
+      transition: all 0.3s ease;
+      color: #1a1a1a; /* Ensure text is readable on light blue */
+    }
+
+    .section:hover {
+      box-shadow: 0 6px 16px rgba(0, 74, 173, 0.12);
+    }
+
+    .section h2 {
+      text-align: center;
+      color: #ffffff;
+      font-family: 'Oswald', sans-serif;
+      font-size: 2rem;
+      margin-bottom: 20px;
+      border-bottom: 3px solid #c62828;
+      display: inline-block;
+      padding-bottom: 6px;
+      letter-spacing: 0.5px;
+    }
+
+    /* TEAM OF THE WEEK */
+    .totw {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 25px;
+        /* Blue-tinted light background */
+      border-radius: 12px;
+      padding: 40px 20px;
+    }
+
+    .totw-row {
+      display: flex;
+      justify-content: center;
+      gap: 35px;
+      flex-wrap: wrap;
+    }
+
+    .player {
+      position: relative;
+      text-align: center;
+      border-radius: 12px;
+      border-color: #ffffff;
+      padding: 15px 15px 20px;
+      box-shadow: 0 4px 10px rgba(0, 0, 0, 0.08);
+      width: 235px;
+      transition: transform 0.25s ease, box-shadow 0.25s ease;
+    }
+
+    .player:hover {
+      transform: translateY(-4px);
+      box-shadow: 0 6px 14px rgba(255, 255, 255, 0.12);
+    }
+
+    .player img {
+      width: 100%;
+      border-radius: 10px;
+    }
+
+    /* Red circular score bubble */
+    .score-bubble {
+      position: absolute;
+      top: -20px;
+      right: -15px;
+      background-color: #c62828;
+      color: #fff;
+      font-size: 1.4rem;
+      font-weight: 700;
+      padding: 14px 14px;
+      border-radius: 55%;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+    }
+
+    /* Player name below */
+    .player-name {
+      margin-top: 10px;
+      font-weight: 600;
+      color: #ffffff;
+      font-size: 1.05rem;
+    }
+
+
+    /* HIGHLIGHT SECTIONS */
+    .highlight {
+      background: #f8fbff;
+      border-left: 6px solid #004aad;
+      border-right: 6px solid #c62828;
+      padding-right: 22px;
+      padding-left: 22px;
+      padding-top: 0.2px;
+      padding-bottom: 22px;
+      margin: 18px 0;
+      border-radius: 12px;
+      box-shadow: 0 2px 6px rgba(0, 74, 173, 0.08);
+    }
+
+    .highlight h3 {
+      color: #c62828;
+      margin-bottom: 8px;
+      font-family: 'Oswald', sans-serif;
+      font-size: 1.3rem;
+      letter-spacing: 0.5px;
+    }
+
+    .highlight p {
+      font-size: 1rem;
+      color: #333;
+      margin: 0;
+    }
+
+    /* QUOTE */
+    .quote-box {
+      background: #ffff;
+      border-left: 6px solid #004aad;
+      border-right: 6px solid #c62828;
+      padding: 25px;
+      font-style: italic;
+      font-size: 1.25rem;
+      text-align: center;
+      border-radius: 12px;
+      color: #2a2a2a;
+      box-shadow: 0 3px 6px rgba(0, 0, 0, 0.05);
+    }
+
+    /* FOOTER */
+    footer {
+      text-align: center;
+      padding: 30px;
+      color: #555;
+      font-size: 0.9rem;
+    }
+
+    /* Table (theme-aligned + responsive) */
+.table-wrapper {
+  width: 100%;
+  overflow-x: auto;                      /* horizontal scroll on small screens */
+  -webkit-overflow-scrolling: touch;
+  margin: 12px 0;
+  padding-bottom: 6px;
+}
+
+/* container to visually fit with the highlight and section */
+.stats-table {
+  width: 100%;
+  max-width: 100%;
+  border-collapse: collapse;
+  font-family: "Inter", sans-serif;
+  font-size: 0.95rem;
+  background: #ffffff;
+  border-radius: 10px;
+  box-shadow: 0 6px 18px rgba(2, 42, 88, 0.06);
+  overflow: hidden; /* makes rounded corners hide borders */
+}
+
+/* header */
+.stats-table thead th {
+  background: linear-gradient(180deg, #003d8a 0%, #002b5b 100%); /* deep blues */
+  color: #ffffff;
+  font-weight: 700;
+  padding: 12px 14px;
+  text-align: left;
+  letter-spacing: 0.35px;
+  font-family: 'Oswald', sans-serif;
+  font-size: 0.95rem;
+}
+
+/* body cells */
+.stats-table tbody td {
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(2, 42, 88, 0.06);
+  color: #0d2436; /* dark slate for legibility */
+}
+
+/* subtle row striping & hover */
+.stats-table tbody tr:nth-child(even) {
+  background: #f6fbff;
+}
+.stats-table tbody tr:hover {
+  background: #eaf4ff;
+}
+
+/* small devices: make numbers right-aligned for readability */
+.stats-table td:nth-child(n+5) { text-align: right; }
+
+/* compact on smaller screens */
+@media (max-width: 640px) {
+  .stats-table thead th { font-size: 0.85rem; padding: 10px; }
+  .stats-table tbody td { font-size: 0.85rem; padding: 8px; }
+}
+
+/* optional: subtle red accent for Score column header */
+.stats-table thead th.score-col { border-left: 4px solid #c62828; padding-left: 10px; }
+
+  </style>
+
+  <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;600&family=Inter:wght@400;600&display=swap" rel="stylesheet">
+</head>
+
+<body>
+  <header>
+    <h1>🏒 Fantasy Hockey Week 1 Newsletter</h1>
+    <p>Presented by Your Commissioner (don't take it personally, it's just for fun)</p>
+  </header>
+
+  <section class="section">
+    <h2>Team of the Week</h2>
+    <div class="totw">
+      <div class="totw-row">
+        
+        <div class="player"><img src="lw.png" alt="LW"><div class="player-name">LW - Kyle Connor</div><div class='score-bubble'>93.2</div> </div>
+        <div class="player"><img src="c.png" alt="C"><div class="player-name">C - Jack Eichel</div><div class='score-bubble'>93.9</div></div>
+        <div class="player"><img src="rw.png" alt="RW"><div class="player-name">RW - Mark Stone</div><div class='score-bubble'>92.8</div></div>
+      </div>
+      <div class="totw-row">
+        <div class="player"><img src="d1.png" alt="D"><div class="player-name">D - Adam Fox </div><div class='score-bubble'>95.1</div></div>
+        <div class="player"><img src="d2.png" alt="D"><div class="player-name">D - Darnell Nurse </div><div class='score-bubble'>88.7</div></div>
+      </div>
+      <div class="player"><img src="g.png" alt="G"><div class="player-name">G - Igor Shesterkin</div><div class='score-bubble'>97.5</div></div>
+    </div>  
+    <div>
+      
+    </div>
+  </section>
+
+  <section class="section">
+    <h2>Top Players of the Week</h2>
+    <div class="highlight">
+      <h3>Skaters</h3>
+      <div class="table-wrapper">
+  <table class="stats-table" aria-describedby="best-matchup">
+    <thead>
+      <tr>
+        <th>Rank</th>
+        <th>Name</th>
+        <th>Team</th>
+        <th>Pos</th>
+        <th>G</th>
+        <th>A</th>
+        <th>PP</th>
+        <th>SH</th>
+        <th>SOG</th>
+        <th>FOL</th>
+        <th>BLK</th>
+        <th>HIT</th>
+        <th class="score-col">Score</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td>1</td><td>Jack Eichel</td><td>VEG</td><td>C</td><td>2</td><td>5</td><td>4</td><td>0</td><td>11</td><td>21</td><td>1</td><td>4</td><td>95.10</td></tr>
+      <tr><td>2</td><td>Adam Fox</td><td>NYR</td><td>D</td><td>3</td><td>1</td><td>0</td><td>1</td><td>9</td><td>0</td><td>5</td><td>2</td><td>93.90</td></tr>
+      <tr><td>3</td><td>Kyle Connor</td><td>WPG</td><td>LW</td><td>3</td><td>1</td><td>1</td><td>1</td><td>10</td><td>0</td><td>1</td><td>0</td><td>93.20</td></tr>
+      <tr><td>4</td><td>Mark Stone</td><td>VEG</td><td>RW</td><td>0</td><td>5</td><td>4</td><td>0</td><td>5</td><td>1</td><td>4</td><td>2</td><td>92.80</td></tr>
+      <tr><td>5</td><td>Kirill Kaprizov</td><td>MIN</td><td>LW</td><td>2</td><td>4</td><td>2</td><td>0</td><td>11</td><td>0</td><td>1</td><td>2</td><td>90.80</td></tr>
+      <tr><td>6</td><td>David Pastrňák</td><td>BOS</td><td>RW</td><td>1</td><td>3</td><td>2</td><td>0</td><td>13</td><td>0</td><td>1</td><td>6</td><td>89.90</td></tr>
+      <tr><td>7</td><td>Matt Boldy</td><td>MIN</td><td>LW</td><td>2</td><td>4</td><td>3</td><td>0</td><td>6</td><td>2</td><td>1</td><td>0</td><td>89.80</td></tr>
+      <tr><td>8</td><td>Adrian Kempe</td><td>LAK</td><td>LW</td><td>1</td><td>2</td><td>1</td><td>0</td><td>12</td><td>2</td><td>4</td><td>11</td><td>88.70</td></tr>
+      <tr><td>9</td><td>Darnell Nurse</td><td>EDM</td><td>D</td><td>0</td><td>1</td><td>0</td><td>1</td><td>6</td><td>0</td><td>6</td><td>7</td><td>88.70</td></tr>
+      <tr><td>10</td><td>Martin Nečas</td><td>LAK</td><td>C</td><td>3</td><td>3</td><td>2</td><td>0</td><td>6</td><td>1</td><td>1</td><td>2</td><td>88.30</td></tr>
+      <tr><td>11</td><td>Drew Doughty</td><td>COL</td><td>D</td><td>0</td><td>2</td><td>0</td><td>1</td><td>5</td><td>0</td><td>6</td><td>4</td><td>88.20</td></tr>
+      <tr><td>12</td><td>Mika Zibanejad</td><td>NYR</td><td>C/RW</td><td>1</td><td>0</td><td>0</td><td>1</td><td>19</td><td>21</td><td>2</td><td>5</td><td>86.50</td></tr>
+      <tr><td>13</td><td>Leon Draisaitl</td><td>EDM</td><td>C</td><td>2</td><td>1</td><td>1</td><td>1</td><td>8</td><td>14</td><td>0</td><td>2</td><td>86.50</td></tr>
+      <tr><td>14</td><td>Cale Makar</td><td>COL</td><td>D</td><td>0</td><td>3</td><td>2</td><td>0</td><td>8</td><td>0</td><td>5</td><td>4</td><td>86.20</td></tr>
+      <tr><td>15</td><td>Jesper Bratt</td><td>NJD</td><td>W</td><td>2</td><td>1</td><td>0</td><td>1</td><td>4</td><td>0</td><td>1</td><td>4</td><td>86.20</td></tr>
+    </tbody>
+  </table>
+  <p></p>
+    <h3>Goalies</h3>
+    <table class="stats-table" aria-describedby="best-matchup">
+    <thead>
+      <tr>
+        <th>Rank</th>
+        <th>Name</th>
+        <th>Team</th>
+        <th>Pos</th>
+        <th>W</th>
+        <th>SV</th>
+        <th>GAA</th>
+        <th>SO</th>
+        <th class="score-col">Score</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td>1</td><td>Igor Shesterkin</td><td>NYR</td><td>G</td><td>2</td><td>83</td><td>0.67</td><td>1</td><td>97.50</td></tr>
+      <tr><td>2</td><td>Charlie Lindgren</td><td>WSH</td><td>G</td><td>1</td><td>35</td><td>0</td><td>1</td><td>94.80</td></tr>
+      <tr><td>3</td><td>Sergei Bobrovsky</td><td>FLA</td><td>G</td><td>3</td><td>62</td><td>1.67</td><td>0</td><td>93.20</td></tr>
+      <tr><td>4</td><td>Filip Gustavsson</td><td>MIN</td><td>G</td><td>1</td><td>51</td><td>3.03</td><td>1</td><td>89.70</td></tr>
+      <tr><td>5</td><td>Arturs Silovs</td><td>PIT</td><td>G</td><td>1</td><td>49</td><td>3.01</td><td>1</td><td>89.10</td></tr>
+    </tbody>  
+  </table>
+</div>
+</section>
+<section class="section">
+   </div>  
+    <h2>Tightest Matchup of the Week</h2>
+    <div class="highlight">
+      <h3>Laffy vs. Teemu's salami (5-5)</h3>
+      <p>Intense matchup between FX and Thomas throughout the week. It ultimately ended in a draw with Thomas grabbing a late point in Sunday's Rangers vs. Capitals match.  </p>
+    </div>
+</section>
+
+  <section class="section">
+    <h2>Beating of the Week</h2>
+    <div class="highlight">
+      <h3>Bench Warmer’s United vs. Ivan the Greats (8-2)</h3>
+      <p>Despite having an extra 3 game advantage, JJ's team could not compete with Matthew's, ultimately getting slapped in almost every category... you 8-2 see it.</p>
+    </div>
+  </section>
+
+  <section class="section">
+    <h2>Comeback of the Week</h2>
+    <div class="highlight">
+      <h3>Tremblay (HM: Teemu's salami)</h3>
+      <p>From losing 6-3 on Thursday, to winning the matchup 5-2, safe to say that this week's best comeback goes to Oli, though Ludo's Saturday shambles definitely helped. HM: Thomas M. who cameback from a 7-2 deficit to tie the matchup 5-5. </p>
+    </div>
+  </section>
+
+  <section class="section">
+    <h2>Bench Manager of the Week</h2>
+    <div class="highlight">
+      <h3>The Hyman Breaker (HM: Alex's Brilliant Team)</h3>
+      <p>This was a tough decision, especially with the 16 game Saturday schedule, which presented a lot of opportunities for bench blunders to happen across the league, and boy did they happen. However, I think this week's award should go to Ludo who ended up bencing 2 goals and 5 assists worth, which would have helped him secure, at the very least, a draw in the matchup. HM to Alex, who benched Marchenko's hat-trick.   </p>
+    </div>
+  </section>
+
+  <section class="section">
+    <h2>Stream of the Week</h2>
+    <div class="highlight">
+      <h3>The Hyman Breaker (HM: Managers who picked up Wedgewood)</h3>
+      <p>Though it was a tough first week for the self-proclaimed Fantasy whisperer, props have to be given to Ludo for the Elias Lindholm pickup, who ultimately yielded 4 points across the week. HM to Thomas M. and Mike for the Wedgewood pick ups.  </p>
+    </div>
+   </section>
+
+  <section class="section">
+    <h2>Manager of the Week: </h2>
+    <div class="quote-box">
+      Matthew De Fanti (Bench Warmer’s United)
+    </div>
+  </section>
+
+  <footer>
+    If You See This, Just Know Your Mom A Baddie
+  </footer>
+</body>
+</html>
