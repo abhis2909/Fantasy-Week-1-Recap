@@ -1,0 +1,206 @@
+# Slapshot City Fantasy Hockey League
+
+A commissioner-run website for a Yahoo fantasy hockey league: standings, a
+category-by-category stats breakdown, a weekly "Team of the Week" picked by
+statistical z-score, transaction tracking with 1–10 peer ratings, and a
+"hostile yet friendly" AI-narrated weekly recap newsletter.
+
+Built with Next.js (App Router, TypeScript), Prisma + Postgres, Auth.js
+(email magic links), and the Anthropic API for recap prose.
+
+## Feature map
+
+| Feature | Where |
+|---|---|
+| League standings (H2H Categories W-L-T) | `/standings`, `lib/standings.ts` |
+| Season-to-date category totals | `/categories`, `lib/standings.ts` |
+| Team of the Week (per-position z-score) | `/team-of-the-week`, `lib/team-of-week.ts` |
+| Transactions + 1–10 peer ratings | `/transactions`, `lib/transactions.ts` |
+| Weekly recap newsletter | `/recaps`, `lib/recap/*` |
+| Commissioner data entry | `/admin/*` |
+
+## Getting started
+
+1. **Install dependencies**
+
+   ```bash
+   npm install
+   ```
+
+2. **Configure environment.** Copy `.env.example` to `.env` and fill in at
+   least `DATABASE_URL` (a Postgres connection string) and `AUTH_SECRET`
+   (`npx auth secret`). `RESEND_API_KEY` and `ANTHROPIC_API_KEY` are optional
+   for local dev — see [Running without API keys](#running-without-api-keys).
+
+3. **Set up the database**
+
+   ```bash
+   npx prisma migrate dev
+   npx prisma db seed   # only needed if migrate dev doesn't run it automatically
+   ```
+
+   This creates a fixture league ("Slapshot City Fantasy Hockey League"),
+   8 teams/managers, a full Week 1 (rosters, stats, matchups, a couple of
+   transactions with ratings), engineered so every recap detector has
+   something to say. The seed script prints which email to sign in with as
+   the commissioner — by default the account belongs to whoever's email is
+   configured in `prisma/seed.ts` (`MANAGERS[0]`), which you should change to
+   your own before reseeding for real use.
+
+4. **Run it**
+
+   ```bash
+   npm run dev
+   ```
+
+   Visit `http://localhost:3000`, enter your email on the sign-in page, and
+   grab the magic link from the terminal (see below).
+
+### Running without API keys
+
+The app is fully functional with an empty `.env` beyond `DATABASE_URL` and
+`AUTH_SECRET`:
+
+- **No `RESEND_API_KEY`**: sign-in links are printed to the dev server's
+  terminal instead of emailed. Copy the URL from the console into your
+  browser.
+- **No `ANTHROPIC_API_KEY`**: the weekly recap falls back to a deterministic
+  template generator (`lib/recap/templateGenerator.ts`) instead of calling
+  Claude. It covers every algorithmic section (tightest matchup, manager of
+  the week, choker of the week, etc.) but skips the creative ones (Clutch,
+  Clown, Quote of the Week), since those aren't derivable from stats alone.
+
+## Data model
+
+`prisma/schema.prisma` is the source of truth; the short version:
+
+- **League → Season → Week** is the season structure. `League.positionSlots`
+  (e.g. `{"C":1,"LW":1,"RW":1,"D":2,"G":1}`) and `ScoringCategory` rows
+  (code, label, which positions it applies to, whether higher is better) are
+  both data, not hardcoded — the app doesn't assume any specific roster
+  shape or category set beyond the five hockey positions.
+- **Team / Player / RosterEntry** track season-long roster ownership.
+  **WeeklyRosterSlot** is a separate per-week snapshot of who started vs. was
+  benched — that's what makes Choker of the Week and optimal-lineup%
+  possible.
+- **StatLine** is one player's value in one category for one week.
+- **Matchup / MatchupCategoryResult** store a week's head-to-head result,
+  computed (not hand-entered) from the two teams' started players' stat
+  totals — see `lib/matchups.ts`.
+- **Transaction / TransactionPlayer / TransactionRating** log adds, drops,
+  and trades and the 1–10 ratings other managers leave on them.
+- **RecapArticle / RecapSection** hold the generated newsletter — sections
+  are structured (`type`, `title`, `body`), not one HTML blob, so a future
+  PDF export or a redesign can render them without reverse-engineering
+  markup.
+- Every row that could plausibly come from a Yahoo sync one day
+  (`Team.externalSource`, `Player.externalSource`, `StatLine.source`, …)
+  already carries a `DataSource` (`MANUAL | CSV_IMPORT | YAHOO_SYNC`) —
+  see [Future: Yahoo integration](#future-yahoo-fantasy-api-integration).
+
+## Weekly commissioner workflow
+
+Everything below lives under `/admin` (commissioner-only — gated on
+`User.role`).
+
+1. **Start the week** — `/admin/matchups` → "Start next week" creates the
+   next `Week` row.
+2. **Log any transactions** that happened — `/admin/transactions/new`. Adds
+   create a brand-new `Player`; drops and trades operate on existing active
+   roster entries.
+3. **Import stat lines** — `/admin/stats`, CSV upload. Expected columns:
+
+   ```
+   team, player, position, started, G, A, +/-, PIM, PPP, SOG, HIT, BLK, W, GAA, SV%, SO
+   ```
+
+   `team` and `player` must exactly match an existing team name and a player
+   already on that team's active roster (that's why transactions are logged
+   first). Category columns only need values for the categories relevant to
+   that player's position — leave the rest blank. The whole file is
+   validated before anything is written: a bad row rejects the entire
+   upload with a list of what to fix, rather than partially importing.
+4. **Compute matchup results** — `/admin/matchups`, pick who played whom,
+   click compute. Results are derived from started players' stat totals, not
+   typed in — so this step must come after stat import.
+5. **Generate and publish the recap** — `/admin/recaps` → pick the week →
+   "Generate draft" → review/edit each section inline → "Publish". Every
+   regeneration replaces the draft and un-publishes the article, so a bad
+   regen can never silently overwrite what's already live.
+
+## Design system
+
+The navy/cream/red/blue theme, Oswald/Inter fonts, and card/highlight-box
+visual language are pulled from an earlier static mockup
+(`fantasywebsite/index.html`, preserved in git history at commit `1f3a475`)
+and rebuilt as Tailwind v4 theme tokens (`app/globals.css`) plus reusable
+components in `components/ui/` and `components/totw/`. The per-position
+illustrated player avatars in `public/images/positions/` are from that same
+mockup — generic placeholders, not real player likenesses.
+
+## Algorithms worth knowing about
+
+- **Standings** (`lib/standings.ts`) are H2H Categories: a season W-L-T
+  record from each week's matchup result, not a points total.
+- **Team of the Week** (`lib/team-of-week.ts`) ranks players by z-score
+  *within their position's pool of rostered players that week*, falling
+  back to raw score when the pool is too small (<3) or has zero variance.
+- **Recap detectors** (`lib/recap/detectors.ts`) are pure functions that
+  decide *who* wins each section (Manager of the Week is a weighted
+  composite of category win rate, optimal-lineup%, and transaction quality;
+  Choker of the Week finds the largest bench-vs-started z-score gap at the
+  same position; Comeback of the Week compares this week's result to
+  rolling season form, and is correctly empty in Week 1). Claude (or the
+  template fallback) only narrates these pre-decided facts — it never picks
+  the winner, so the recap can't accidentally invent one.
+
+## Deploying
+
+Built for Vercel + a hosted Postgres provider (Neon, Supabase, etc.):
+
+1. Provision a Postgres database and set `DATABASE_URL` in Vercel's env vars.
+2. Set `AUTH_SECRET`, `RESEND_API_KEY` + `EMAIL_FROM`, and
+   `ANTHROPIC_API_KEY` + `ANTHROPIC_MODEL` as needed.
+3. Run `npx prisma migrate deploy` against the production database (either
+   locally with `DATABASE_URL` pointed at prod, or as a Vercel build step).
+4. If you want the recap draft to auto-generate weekly, wire a Vercel Cron
+   job to call a small authenticated route that runs
+   `generateRecapDraft(weekId)` — this repo doesn't include that route yet
+   since publishing still requires a commissioner's review either way.
+
+## Known simplifications / follow-ups
+
+- **Yahoo Fantasy API integration** is intentionally not built yet — see
+  below.
+- **PDF export** isn't built. `RecapSection`'s structured shape was chosen
+  so a future exporter (`@react-pdf/renderer`, or headless-Chromium
+  print-to-PDF of `/recaps/[weekId]`) can render section-by-section later.
+- **iMessage delivery** was explicitly ruled out in favor of the in-app
+  article — no messaging integration exists or is planned.
+- Re-adding a previously-dropped player currently creates a new `Player`
+  row rather than reusing the old one (no free-agent pool is tracked). Fine
+  for a season where re-adds are rare; worth revisiting if not.
+- The stat-line CSV importer requires players to already be on a team's
+  active roster (via a prior ADD transaction) — it won't silently create
+  players, by design, but that means transaction logging has to happen
+  before that week's CSV import.
+- The per-category weights used for Team of the Week / Manager of the Week /
+  Choker of the Week (`lib/scoring/weeklyScore.ts`) are a reasonable default
+  "points league" conversion, not yet league-configurable.
+
+### Future: Yahoo Fantasy API integration
+
+The schema was deliberately built so this is an additive change, not a
+rewrite:
+
+- `Team` and `Player` already carry `externalSource` (`MANUAL | CSV_IMPORT |
+  YAHOO_SYNC`) and `externalId`.
+- `StatLine` carries `source` the same way.
+- A Yahoo sync job would authenticate via OAuth2 against Yahoo's Fantasy
+  Sports API, map Yahoo's league/team/player IDs into `externalId`, and
+  write `StatLine`/`Matchup`/roster rows exactly like the CSV importer does
+  today — just with `YAHOO_SYNC` as the source instead of `CSV_IMPORT`, and
+  no commissioner CSV step in between.
+- The one thing to decide before building it: whether Yahoo becomes the
+  *only* data source going forward or runs alongside manual entry — the
+  schema supports either.

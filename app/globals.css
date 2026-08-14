@@ -1,0 +1,38 @@
+@import "tailwindcss";
+
+/*
+ * Design system pulled from the original fantasywebsite/index.html mockup
+ * (see git history commit 1f3a475). This app commits to one branded
+ * "sports newsletter" look rather than adapting to system dark mode —
+ * same reasoning as the mockup: it's a themed publication, not a generic
+ * app surface.
+ */
+:root {
+  --color-cream: #f8f6f1;
+  --color-cream-soft: #f8fbff;
+  --color-navy: #012e5f;
+  --color-navy-deep: #002b5b;
+  --color-navy-ink: #0d1b2a;
+  --color-red: #c62828;
+  --color-blue: #004aad;
+  --color-ink: #1c1c1c;
+}
+
+@theme inline {
+  --color-cream: var(--color-cream);
+  --color-cream-soft: var(--color-cream-soft);
+  --color-navy: var(--color-navy);
+  --color-navy-deep: var(--color-navy-deep);
+  --color-navy-ink: var(--color-navy-ink);
+  --color-red: var(--color-red);
+  --color-blue: var(--color-blue);
+  --color-ink: var(--color-ink);
+  --font-heading: var(--font-oswald);
+  --font-body: var(--font-inter);
+}
+
+body {
+  background: var(--color-cream);
+  color: var(--color-ink);
+  font-family: var(--font-body), sans-serif;
+}
