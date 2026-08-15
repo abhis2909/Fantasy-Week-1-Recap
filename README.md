@@ -2,8 +2,8 @@
 
 A commissioner-run website for a Yahoo fantasy hockey league: standings, a
 category-by-category stats breakdown, a weekly "Team of the Week" picked by
-statistical z-score, transaction tracking with 1–10 peer ratings, and a
-"hostile yet friendly" AI-narrated weekly recap newsletter.
+a fixed-weight 0–100 valuation model, transaction tracking with 1–10 peer
+ratings, and a "hostile yet friendly" AI-narrated weekly recap newsletter.
 
 Built with Next.js (App Router, TypeScript), Prisma + Postgres, Auth.js
 (email + password), and the Anthropic API for recap prose.
@@ -19,7 +19,7 @@ to someone) or to reach `/admin` as the commissioner.
 |---|---|
 | League standings (H2H Categories W-L-T) | `/standings`, `lib/standings.ts` |
 | Season-to-date category totals | `/categories`, `lib/standings.ts` |
-| Team of the Week (per-position z-score, player cards w/ rating + stats) | `/team-of-the-week`, `lib/team-of-week.ts` |
+| Team of the Week (per-position best score, player cards w/ rating + stats) | `/team-of-the-week`, `lib/team-of-week.ts` |
 | Transactions + 1–10 peer ratings | `/transactions`, `lib/transactions.ts` |
 | Weekly recap newsletter | `/recaps`, `lib/recap/*` |
 | Commissioner data entry | `/admin/*` |
@@ -286,18 +286,33 @@ detail page (`/players/[playerId]`) showing:
   rate stats like GAA/SV% are averaged across games, not summed).
 - **Last 10 games**, each with a short stat line and a **0–100 rating**.
 
-The rating is the same z-score method used for Team of the Week
-(`lib/playerRating.ts`'s `ratingFromZ`: `z = 0` → 50, roughly ±1 standard
-deviation → ±15 points, clamped to 0–100), just applied per game instead of
-per fantasy week. For each of a player's games, `rateGamesForPlayer` builds
-a peer pool of every other currently-rostered player at the same position
-whose game fell in the same Monday-anchored calendar week, then scores that
-game's composite value against that pool. Games with fewer than 3 peers to
-compare against fall back to a coarse 40/50/60 (below/at/above a flat
-threshold) rather than a fabricated precise z-score — shown as "low sample"
-on the page. Team of the Week picks use the exact same `ratingFromZ` scale
-(`TeamOfWeekSelection.rating`), so a "72/100" means the same thing whether
-it's one game or a weekly pick.
+The rating is a fixed-weight valuation model (`lib/playerRating.ts`) —
+originally a peer-relative z-score (a player's game judged against other
+rostered players at their position that week), replaced with a
+commissioner-provided formula since the peer-comparison approach degraded
+to a crude 40/50/60 guess whenever fewer than 3 peers had games that week.
+The new model needs no peer pool at all, so every game gets a real
+computed rating regardless of sample size:
+
+- **Skaters**: `3.0×G + 2.0×A + 1.0×PPP + 2.0×SHP + 0.4×SOG + 0.5×BLK + 0.3×HIT + 0.3×PIM`
+- **Goalies**: `4.0×W + 0.2×SV + 3.0×SO − 1.5×GA` (SV/GA are raw saves/goals-against
+  counts, stored per game in `PlayerGameLog` alongside the standings-facing
+  rate stats GAA/SV% — see `lib/nhl.ts`'s `mapGoalieGameEntry` — since GAA/SV%
+  are rates, not counts, and this formula needs counts)
+- **Standardized to 0–100**: 50 = baseline (1.5 for skaters, 5.0 for
+  goalies), each standard deviation (2.0 skaters, 3.5 goalies) is worth 10
+  points, clamped to 0–100 (`standardizeRating`).
+
+Team of the Week ranks a whole week's totals, not one game, so its rating
+scales the baseline/stdDev by however many games that player actually
+played that week (`ratingForValues`'s `gamesPlayed` parameter) —
+`weeklyValuesAndGameCount` prefers summing real `PlayerGameLog` rows within
+the week's date range (true game count, and the only source with real
+SV/GA for goalies), falling back to the week's `StatLine` totals with an
+assumed 3-game week when no per-game data exists yet (CSV-imported weeks,
+or before "Sync full season game logs" has run). A "72/100" means the same
+thing everywhere — one game, a week, Choker of the Week's bench-vs-started
+comparison — because it's all the same `ratingForValues` call underneath.
 
 Requires the "Sync full season game logs" admin action above to have run at
 least once; until then, player pages show "no synced games yet."
@@ -340,17 +355,21 @@ SVGs at all.
 
 - **Standings** (`lib/standings.ts`) are H2H Categories: a season W-L-T
   record from each week's matchup result, not a points total.
-- **Team of the Week** (`lib/team-of-week.ts`) ranks players by z-score
-  *within their position's pool of rostered players that week*, falling
-  back to raw score when the pool is too small (<3) or has zero variance.
+- **Team of the Week** (`lib/team-of-week.ts`) ranks players by raw weighted
+  score *within their position's pool of rostered players that week*, and
+  reports each pick's 0–100 rating via the same fixed valuation model
+  individual player pages use (see above) — no peer pool needed, so this
+  no longer has a small-sample fallback case at all.
 - **Recap detectors** (`lib/recap/detectors.ts`) are pure functions that
   decide *who* wins each section (Manager of the Week is a weighted
   composite of category win rate, optimal-lineup%, and transaction quality;
-  Choker of the Week finds the largest bench-vs-started z-score gap at the
-  same position; Comeback of the Week compares this week's result to
-  rolling season form, and is correctly empty in Week 1). Claude (or the
-  template fallback) only narrates these pre-decided facts — it never picks
-  the winner, so the recap can't accidentally invent one.
+  Choker of the Week finds the largest bench-vs-started *rating* gap — a
+  benched player rated over 60 (a full standard deviation above baseline)
+  outscoring the worst-rated started player at the same position; Comeback
+  of the Week compares this week's result to rolling season form, and is
+  correctly empty in Week 1). Claude (or the template fallback) only
+  narrates these pre-decided facts — it never picks the winner, so the
+  recap can't accidentally invent one.
 
 ## Deploying
 

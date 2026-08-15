@@ -95,9 +95,7 @@ export default async function PlayerDetailPage({
                 </div>
                 <div className="text-right">
                   <div className="font-heading text-lg text-gold">{g.rating}</div>
-                  <div className="text-[10px] tracking-wide text-cream/50 uppercase">
-                    {g.peerCount >= 3 ? "rated" : "low sample"}
-                  </div>
+                  <div className="text-[10px] tracking-wide text-cream/50 uppercase">/ 100</div>
                 </div>
               </div>
             ))}

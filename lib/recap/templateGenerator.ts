@@ -47,7 +47,7 @@ export function generateTemplateRecap(payload: WeeklyStatsPayload): RecapOutput 
     sections.push({
       type: "CHOKER",
       title: SECTION_TITLES.CHOKER,
-      body: `${c.teamName} benched ${c.benchedPlayerName} (${c.benchedScore} pts, z=${c.benchedZ}) at ${c.position} in favor of ${c.startedPlayerName} (${c.startedScore} pts, z=${c.startedZ}). That is a choice.`,
+      body: `${c.teamName} benched ${c.benchedPlayerName} (${c.benchedScore} pts, rated ${c.benchedRating}/100) at ${c.position} in favor of ${c.startedPlayerName} (${c.startedScore} pts, rated ${c.startedRating}/100). That is a choice.`,
     });
   }
 

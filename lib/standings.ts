@@ -15,8 +15,9 @@ export interface StandingsRow {
 /**
  * H2H Categories standings: a season W-L-T record built from each week's
  * matchup result (who won more categories), NOT a points total — see
- * lib/scoring/weeklyScore.ts for why that distinction matters. Ties break on
- * total category-wins-for across the season.
+ * lib/playerRating.ts for the (separate) composite valuation model used by
+ * Team of the Week and individual player ratings. Ties break on total
+ * category-wins-for across the season.
  */
 export async function computeStandings(seasonId: string): Promise<StandingsRow[]> {
   const teams = await prisma.team.findMany({

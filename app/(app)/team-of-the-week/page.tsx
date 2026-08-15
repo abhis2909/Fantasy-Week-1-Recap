@@ -22,9 +22,7 @@ function Slot({ pick, delayMs = 0 }: { pick: TeamOfWeekPick; delayMs?: number })
         teamName={pick.teamName}
       />
       <p className="text-xs text-cream/60">
-        {pick.usedFallback
-          ? "ranked by raw score (small sample)"
-          : `z-score ${pick.zScore! >= 0 ? "+" : ""}${pick.zScore}`}
+        raw score {pick.rawScore} over {pick.gamesPlayed} game{pick.gamesPlayed === 1 ? "" : "s"}
       </p>
     </Reveal>
   );

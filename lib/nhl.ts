@@ -199,16 +199,23 @@ function mapSkaterGameEntry(raw: Record<string, unknown>): Record<string, number
   };
 }
 
-/** Per-category values for a single goalie game-log entry. */
+/** Per-category values for a single goalie game-log entry. Includes raw SV
+ * (saves) and GA (goals against) counts alongside the standings-facing rate
+ * stats (GAA/SV%) — SV/GA aren't their own ScoringCategory (nothing shows
+ * them on Standings), they only exist so the rating model in
+ * lib/playerRating.ts has real counts to work with instead of rates. */
 function mapGoalieGameEntry(raw: Record<string, unknown>): Record<string, number> {
   const decision = String(raw.decision ?? "").toUpperCase();
   const goalsAgainst = num(raw, "goalsAgainst");
   const shotsAgainst = num(raw, "shotsAgainst", "shots");
+  const saves = Math.max(0, shotsAgainst - goalsAgainst);
   return {
     W: decision.startsWith("W") ? 1 : 0,
     GAA: goalsAgainst,
     "SV%": shotsAgainst > 0 ? Math.round(((shotsAgainst - goalsAgainst) / shotsAgainst) * 1000) / 1000 : 0,
     SO: num(raw, "shutouts") > 0 ? 1 : 0,
+    SV: saves,
+    GA: goalsAgainst,
   };
 }
 

@@ -1,10 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import {
-  computeWeeklyFantasyScore,
-  meanAndStdDev,
-  zScore,
-} from "@/lib/scoring/weeklyScore";
-import { ratingFromZ } from "@/lib/playerRating";
+import { ratingForValues, weeklyValuesAndGameCount } from "@/lib/playerRating";
 import type { Position } from "@/lib/generated/prisma/client";
 
 export interface WeeklyPlayerScore {
@@ -17,44 +12,40 @@ export interface WeeklyPlayerScore {
   started: boolean;
   score: number;
   values: Record<string, number>;
-  /** null when the position pool was too small/uniform to mean anything. */
-  zScore: number | null;
-  usedFallback: boolean;
+  rating: number;
+  gamesPlayed: number;
 }
 
-const MIN_SAMPLE_FOR_ZSCORE = 3;
-
 /**
- * Every rostered player's composite weekly score and their z-score against
- * the rest of the league's pool at the same position that week. This is the
- * shared building block behind both Team of the Week (top N per position)
- * and the Choker of the Week detector (started vs benched at the same
- * position) — both need "how good was this specific player's week, relative
- * to their position peers," just sliced differently.
+ * Every rostered player's weekly composite score and 0-100 rating, via the
+ * fixed per-game valuation model (lib/playerRating.ts) scaled up to
+ * whatever the player actually played that week. This is the shared
+ * building block behind both Team of the Week (top N per position) and the
+ * Choker of the Week detector (started vs benched at the same position) —
+ * both need "how good was this specific player's week," just sliced
+ * differently.
  */
 export async function computeWeeklyPlayerScores(
   weekId: string
 ): Promise<WeeklyPlayerScore[]> {
+  const week = await prisma.week.findUniqueOrThrow({ where: { id: weekId } });
   const rosterSlots = await prisma.weeklyRosterSlot.findMany({
     where: { weekId },
     include: {
       player: {
-        include: { statLines: { where: { weekId }, include: { category: true } } },
+        include: {
+          statLines: { where: { weekId }, include: { category: true } },
+          gameLogs: { where: { gameDate: { gte: week.startDate, lte: week.endDate } } },
+        },
       },
       team: true,
     },
   });
 
-  const byPosition = new Map<Position, WeeklyPlayerScore[]>();
-  for (const slot of rosterSlots) {
-    const score = computeWeeklyFantasyScore(
-      slot.player.statLines.map((sl) => ({ value: sl.value, category: sl.category }))
-    );
-    const values: Record<string, number> = {};
-    for (const sl of slot.player.statLines) values[sl.category.code] = sl.value;
-
-    const list = byPosition.get(slot.slot) ?? [];
-    list.push({
+  return rosterSlots.map((slot) => {
+    const { values, gamesPlayed } = weeklyValuesAndGameCount(slot.player.gameLogs, slot.player.statLines);
+    const { rawScore, rating } = ratingForValues(values, slot.slot, gamesPlayed);
+    return {
       playerId: slot.playerId,
       playerName: slot.player.fullName,
       photoUrl: slot.player.photoUrl,
@@ -62,25 +53,12 @@ export async function computeWeeklyPlayerScores(
       teamName: slot.team.name,
       position: slot.slot,
       started: slot.started,
-      score,
+      score: rawScore,
       values,
-      zScore: null,
-      usedFallback: false,
-    });
-    byPosition.set(slot.slot, list);
-  }
-
-  const all: WeeklyPlayerScore[] = [];
-  for (const list of byPosition.values()) {
-    const { mean, stdDev } = meanAndStdDev(list.map((c) => c.score));
-    const useFallback = stdDev === 0 || list.length < MIN_SAMPLE_FOR_ZSCORE;
-    for (const entry of list) {
-      entry.usedFallback = useFallback;
-      entry.zScore = useFallback ? null : Math.round(zScore(entry.score, mean, stdDev) * 100) / 100;
-      all.push(entry);
-    }
-  }
-  return all;
+      rating,
+      gamesPlayed,
+    };
+  });
 }
 
 export interface TeamOfWeekPick {
@@ -92,18 +70,15 @@ export interface TeamOfWeekPick {
   teamName: string;
   rawScore: number;
   values: Record<string, number>;
-  zScore: number | null;
-  /** 0-100, via the same z-score-to-rating scale used for individual game
-   * ratings — a fallback-ranked pick (small/uniform sample) gets a neutral
-   * 50 rather than a fabricated precise number. */
+  /** 0-100, via the same fixed-weight valuation model used for individual
+   * per-game ratings. */
   rating: number;
-  usedFallback: boolean;
+  gamesPlayed: number;
 }
 
 /**
- * Best player at each position this week, ranked by z-score within that
- * position's pool of rostered players (falls back to raw score when the
- * pool is too small or has zero variance for a z-score to mean anything).
+ * Best player at each position this week, ranked by raw weighted score
+ * within that position's pool of rostered players.
  */
 export async function computeTeamOfWeek(weekId: string): Promise<TeamOfWeekPick[]> {
   const week = await prisma.week.findUniqueOrThrow({
@@ -128,10 +103,7 @@ export async function computeTeamOfWeek(weekId: string): Promise<TeamOfWeekPick[
     const candidates = byPosition.get(position) ?? [];
     if (candidates.length === 0) continue;
 
-    const useFallback = candidates[0]?.usedFallback ?? true;
-    const ranked = [...candidates].sort((a, b) =>
-      useFallback ? b.score - a.score : (b.zScore ?? 0) - (a.zScore ?? 0)
-    );
+    const ranked = [...candidates].sort((a, b) => b.score - a.score);
 
     ranked.slice(0, slotsNeeded).forEach((c, i) => {
       picks.push({
@@ -141,11 +113,10 @@ export async function computeTeamOfWeek(weekId: string): Promise<TeamOfWeekPick[
         playerName: c.playerName,
         photoUrl: c.photoUrl,
         teamName: c.teamName,
-        rawScore: Math.round(c.score * 10) / 10,
+        rawScore: c.score,
         values: c.values,
-        zScore: c.zScore,
-        rating: c.zScore === null ? 50 : ratingFromZ(c.zScore),
-        usedFallback: c.usedFallback,
+        rating: c.rating,
+        gamesPlayed: c.gamesPlayed,
       });
     });
   }
@@ -168,7 +139,9 @@ export async function computeAndSaveTeamOfWeek(
           slotIndex: p.slotIndex,
           playerId: p.playerId,
           rawScore: p.rawScore,
-          zScore: p.zScore,
+          // No longer a meaningful concept under the fixed-weight model —
+          // left null rather than dropping the (nullable) column.
+          zScore: null,
           rating: p.rating,
         },
       })

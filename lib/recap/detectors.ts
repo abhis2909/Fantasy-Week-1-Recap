@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { computeWeeklyFantasyScore } from "@/lib/scoring/weeklyScore";
+import { ratingForValues, weeklyValuesAndGameCount } from "@/lib/playerRating";
 import { computeWeeklyPlayerScores } from "@/lib/team-of-week";
 import type { Position } from "@/lib/generated/prisma/client";
 
@@ -146,19 +146,22 @@ export interface ChokerResult {
   position: Position;
   benchedPlayerName: string;
   benchedScore: number;
-  benchedZ: number;
+  benchedRating: number;
   startedPlayerName: string;
   startedScore: number;
-  startedZ: number;
+  startedRating: number;
   gap: number;
 }
 
-const CHOKER_Z_THRESHOLD = 1.0;
+/** 1 standard deviation above the 50 baseline in the fixed rating model
+ * (standardizeRating adds 10 points per stdDev) — the rating-scale analog
+ * of the old system's "z > 1.0 above the position average." */
+const CHOKER_RATING_THRESHOLD = 60;
 
 /**
- * A benched player who meaningfully outscored (z > 1.0 above the position
- * average) the worst started player at the same position, on the same
- * team. Reports the single largest such gap league-wide.
+ * A benched player who meaningfully outscored (rating > 60, a full standard
+ * deviation above baseline) the worst started player at the same position,
+ * on the same team. Reports the single largest such gap league-wide.
  */
 export async function chokerOfWeek(weekId: string): Promise<ChokerResult | null> {
   const allScores = await computeWeeklyPlayerScores(weekId);
@@ -181,9 +184,9 @@ export async function chokerOfWeek(weekId: string): Promise<ChokerResult | null>
     const benchTop = benched.reduce((a, b) => (b.score > a.score ? b : a));
     const startBottom = started.reduce((a, b) => (b.score < a.score ? b : a));
     if (benchTop.score <= startBottom.score) continue;
-    if ((benchTop.zScore ?? 0) <= CHOKER_Z_THRESHOLD) continue;
+    if (benchTop.rating <= CHOKER_RATING_THRESHOLD) continue;
 
-    const gap = (benchTop.zScore ?? 0) - (startBottom.zScore ?? 0);
+    const gap = benchTop.rating - startBottom.rating;
     if (!best || gap > best.gap) {
       best = {
         teamId,
@@ -191,11 +194,11 @@ export async function chokerOfWeek(weekId: string): Promise<ChokerResult | null>
         position: position as Position,
         benchedPlayerName: benchTop.playerName,
         benchedScore: Math.round(benchTop.score * 10) / 10,
-        benchedZ: benchTop.zScore ?? 0,
+        benchedRating: benchTop.rating,
         startedPlayerName: startBottom.playerName,
         startedScore: Math.round(startBottom.score * 10) / 10,
-        startedZ: startBottom.zScore ?? 0,
-        gap: Math.round(gap * 100) / 100,
+        startedRating: startBottom.rating,
+        gap,
       };
     }
   }
@@ -297,12 +300,20 @@ export interface PickupResult {
 
 /** The single best weekly score among players added this week. */
 export async function pickupOfWeek(weekId: string): Promise<PickupResult | null> {
+  const week = await prisma.week.findUniqueOrThrow({ where: { id: weekId } });
   const adds = await prisma.transaction.findMany({
     where: { weekId, type: "ADD" },
     include: {
       initiatingTeam: true,
       playersInvolved: {
-        include: { player: { include: { statLines: { where: { weekId }, include: { category: true } } } } },
+        include: {
+          player: {
+            include: {
+              statLines: { where: { weekId }, include: { category: true } },
+              gameLogs: { where: { gameDate: { gte: week.startDate, lte: week.endDate } } },
+            },
+          },
+        },
       },
     },
   });
@@ -310,15 +321,14 @@ export async function pickupOfWeek(weekId: string): Promise<PickupResult | null>
   let best: PickupResult | null = null;
   for (const tx of adds) {
     for (const tp of tx.playersInvolved.filter((p) => p.direction === "ADDED")) {
-      const score = computeWeeklyFantasyScore(
-        tp.player.statLines.map((sl) => ({ value: sl.value, category: sl.category }))
-      );
-      if (!best || score > best.score) {
+      const { values } = weeklyValuesAndGameCount(tp.player.gameLogs, tp.player.statLines);
+      const { rawScore } = ratingForValues(values, tp.player.primaryPosition);
+      if (!best || rawScore > best.score) {
         best = {
           transactionId: tx.id,
           teamName: tx.initiatingTeam.name,
           playerName: tp.player.fullName,
-          score: Math.round(score * 10) / 10,
+          score: Math.round(rawScore * 10) / 10,
         };
       }
     }
