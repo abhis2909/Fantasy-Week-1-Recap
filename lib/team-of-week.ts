@@ -4,6 +4,7 @@ import {
   meanAndStdDev,
   zScore,
 } from "@/lib/scoring/weeklyScore";
+import { ratingFromZ } from "@/lib/playerRating";
 import type { Position } from "@/lib/generated/prisma/client";
 
 export interface WeeklyPlayerScore {
@@ -15,6 +16,7 @@ export interface WeeklyPlayerScore {
   position: Position;
   started: boolean;
   score: number;
+  values: Record<string, number>;
   /** null when the position pool was too small/uniform to mean anything. */
   zScore: number | null;
   usedFallback: boolean;
@@ -48,6 +50,9 @@ export async function computeWeeklyPlayerScores(
     const score = computeWeeklyFantasyScore(
       slot.player.statLines.map((sl) => ({ value: sl.value, category: sl.category }))
     );
+    const values: Record<string, number> = {};
+    for (const sl of slot.player.statLines) values[sl.category.code] = sl.value;
+
     const list = byPosition.get(slot.slot) ?? [];
     list.push({
       playerId: slot.playerId,
@@ -58,6 +63,7 @@ export async function computeWeeklyPlayerScores(
       position: slot.slot,
       started: slot.started,
       score,
+      values,
       zScore: null,
       usedFallback: false,
     });
@@ -85,7 +91,12 @@ export interface TeamOfWeekPick {
   photoUrl: string | null;
   teamName: string;
   rawScore: number;
+  values: Record<string, number>;
   zScore: number | null;
+  /** 0-100, via the same z-score-to-rating scale used for individual game
+   * ratings — a fallback-ranked pick (small/uniform sample) gets a neutral
+   * 50 rather than a fabricated precise number. */
+  rating: number;
   usedFallback: boolean;
 }
 
@@ -131,7 +142,9 @@ export async function computeTeamOfWeek(weekId: string): Promise<TeamOfWeekPick[
         photoUrl: c.photoUrl,
         teamName: c.teamName,
         rawScore: Math.round(c.score * 10) / 10,
+        values: c.values,
         zScore: c.zScore,
+        rating: c.zScore === null ? 50 : ratingFromZ(c.zScore),
         usedFallback: c.usedFallback,
       });
     });
@@ -156,6 +169,7 @@ export async function computeAndSaveTeamOfWeek(
           playerId: p.playerId,
           rawScore: p.rawScore,
           zScore: p.zScore,
+          rating: p.rating,
         },
       })
     ),

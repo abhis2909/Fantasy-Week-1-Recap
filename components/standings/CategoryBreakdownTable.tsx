@@ -1,11 +1,5 @@
 import type { CategoryTotalsResult } from "@/lib/standings";
-
-function formatValue(value: number | undefined, code: string): string {
-  if (value === undefined) return "–";
-  if (code === "SV%") return value.toFixed(3);
-  if (code === "GAA") return value.toFixed(2);
-  return Number.isInteger(value) ? String(value) : value.toFixed(1);
-}
+import { formatStatValue } from "@/lib/formatStatValue";
 
 export function CategoryBreakdownTable({ data }: { data: CategoryTotalsResult }) {
   const { categories, rows } = data;
@@ -28,7 +22,7 @@ export function CategoryBreakdownTable({ data }: { data: CategoryTotalsResult })
               <td className="py-2.5 pr-3 font-medium text-white">{row.teamName}</td>
               {categories.map((c) => (
                 <td key={c.id} className="py-2.5 pr-3 text-right text-cream/90">
-                  {formatValue(row.totals[c.id], c.code)}
+                  {formatStatValue(row.totals[c.id], c.code)}
                 </td>
               ))}
             </tr>

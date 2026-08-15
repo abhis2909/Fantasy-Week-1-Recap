@@ -4,6 +4,7 @@ import { SectionCard } from "@/components/ui/SectionCard";
 import { HighlightBox } from "@/components/ui/HighlightBox";
 import { QuoteBox } from "@/components/ui/QuoteBox";
 import { PlayerCard } from "@/components/totw/PlayerCard";
+import { shortStatSummary } from "@/lib/statSummary";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/lib/auth";
 
@@ -28,6 +29,17 @@ export default async function RecapArticlePage({
     orderBy: [{ position: "asc" }, { slotIndex: "asc" }],
   });
 
+  const totwStatLines = await prisma.statLine.findMany({
+    where: { weekId, playerId: { in: totwSelections.map((sel) => sel.playerId) } },
+    include: { category: true },
+  });
+  const valuesByPlayer = new Map<string, Record<string, number>>();
+  for (const sl of totwStatLines) {
+    const values = valuesByPlayer.get(sl.playerId) ?? {};
+    values[sl.category.code] = sl.value;
+    valuesByPlayer.set(sl.playerId, values);
+  }
+
   return (
     <>
       <PageHeader
@@ -48,10 +60,12 @@ export default async function RecapArticlePage({
                   {totwSelections.map((sel) => (
                     <PlayerCard
                       key={sel.id}
+                      playerId={sel.playerId}
                       name={sel.player.fullName}
                       position={sel.position}
                       photoUrl={sel.player.photoUrl}
-                      score={sel.rawScore}
+                      rating={sel.rating}
+                      statLine={shortStatSummary(sel.position, valuesByPlayer.get(sel.playerId) ?? {})}
                     />
                   ))}
                 </div>

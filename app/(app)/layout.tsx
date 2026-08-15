@@ -6,6 +6,7 @@ const NAV_LINKS = [
   { href: "/standings", label: "Standings" },
   { href: "/categories", label: "Categories" },
   { href: "/team-of-the-week", label: "Team of the Week" },
+  { href: "/players", label: "Players" },
   { href: "/transactions", label: "Transactions" },
   { href: "/recaps", label: "Recaps" },
 ];

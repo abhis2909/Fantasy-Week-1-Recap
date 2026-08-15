@@ -12,6 +12,7 @@ import {
   getRawGameLogJson,
   aggregateSkaterStats,
   aggregateGoalieStats,
+  mapGameLogToPerGameValues,
   mapWithConcurrency,
   NHL_GAME_TYPE_REGULAR_SEASON,
 } from "@/lib/nhl";
@@ -46,6 +47,13 @@ export default async function NhlSyncPage({
   const debugName = Array.isArray(sp.debugName) ? sp.debugName[0] : sp.debugName;
   const debugResult = Array.isArray(sp.debugResult) ? sp.debugResult[0] : sp.debugResult;
   const debugError = Array.isArray(sp.debugError) ? sp.debugError[0] : sp.debugError;
+
+  const gamesMatched = Array.isArray(sp.gamesMatched) ? sp.gamesMatched[0] : sp.gamesMatched;
+  const gamesSynced = Array.isArray(sp.gamesSynced) ? sp.gamesSynced[0] : sp.gamesSynced;
+  const gamesSkipped = (Array.isArray(sp.gamesSkipped) ? sp.gamesSkipped : sp.gamesSkipped ? [sp.gamesSkipped] : []) as string[];
+  const gamesErrored = (Array.isArray(sp.gamesErrored) ? sp.gamesErrored : sp.gamesErrored ? [sp.gamesErrored] : []) as string[];
+
+  const gameLogCount = await prisma.playerGameLog.count();
 
   async function syncPhotos() {
     "use server";
@@ -155,6 +163,68 @@ export default async function NhlSyncPage({
     );
   }
 
+  async function syncGameLogs() {
+    "use server";
+    const activeRoster = await prisma.rosterEntry.findMany({
+      where: { droppedAt: null, team: { seasonId: season.id } },
+      include: { player: true },
+    });
+    const seasonId = `${season.year}${season.year + 1}`;
+
+    let playersMatched = 0;
+    let gamesUpserted = 0;
+    const skipped: string[] = [];
+    const errored: string[] = [];
+
+    await mapWithConcurrency(activeRoster, 6, async (entry) => {
+      const player = entry.player;
+      try {
+        let nhlId = player.externalId ? Number(player.externalId) : null;
+        if (!nhlId) {
+          const match = await findBestNhlMatch(player.fullName);
+          if (!match) {
+            skipped.push(player.fullName);
+            return;
+          }
+          nhlId = match.nhlPlayerId;
+          await prisma.player.update({
+            where: { id: player.id },
+            data: { externalId: String(nhlId), externalSource: "NHL_SYNC" },
+          });
+        }
+
+        const gameLog = await getPlayerGameLog(nhlId, seasonId, NHL_GAME_TYPE_REGULAR_SEASON);
+        const perGame = mapGameLogToPerGameValues(gameLog, player.primaryPosition === "G" ? "G" : "SKATER");
+        if (perGame.length === 0) {
+          skipped.push(`${player.fullName} (no games found)`);
+          return;
+        }
+
+        for (const g of perGame) {
+          await prisma.playerGameLog.upsert({
+            where: { playerId_gameDate: { playerId: player.id, gameDate: new Date(`${g.gameDate}T00:00:00Z`) } },
+            create: {
+              playerId: player.id,
+              gameDate: new Date(`${g.gameDate}T00:00:00Z`),
+              values: g.values,
+              source: "NHL_SYNC",
+            },
+            update: { values: g.values, source: "NHL_SYNC" },
+          });
+          gamesUpserted++;
+        }
+        playersMatched++;
+      } catch (err) {
+        errored.push(`${player.fullName} (${err instanceof Error ? err.message : "unknown error"})`);
+      }
+    });
+
+    revalidatePath("/admin/nhl-sync");
+    redirect(
+      `/admin/nhl-sync?${qs({ gamesMatched: playersMatched, gamesSynced: gamesUpserted })}${skipped.map((n) => `&gamesSkipped=${encodeURIComponent(n)}`).join("")}${errored.map((n) => `&gamesErrored=${encodeURIComponent(n)}`).join("")}`
+    );
+  }
+
   async function debugPreview(formData: FormData) {
     "use server";
     const name = (formData.get("debugName") as string)?.trim();
@@ -241,6 +311,33 @@ export default async function NhlSyncPage({
             className="rounded-lg bg-gold px-4 py-2 text-sm font-semibold text-navy-deep transition hover:bg-gold-bright"
           >
             Pull stats from NHL for this week
+          </button>
+        </form>
+      </SectionCard>
+
+      <SectionCard title="Individual player pages: full season game log">
+        <p className="mb-4 text-cream/80">
+          {gameLogCount} game{gameLogCount === 1 ? "" : "s"} stored across all players. Powers
+          the per-player pages (<code className="text-gold">/players</code>) — season totals,
+          last 10 games, and a 0-100 rating for each game based on a z-score against other
+          rostered players at the same position that week.
+        </p>
+        {gamesMatched && (
+          <HighlightBox title="Sync complete">
+            <p>
+              Synced {gamesSynced} game{gamesSynced === "1" ? "" : "s"} across {gamesMatched}{" "}
+              player{gamesMatched === "1" ? "" : "s"}.
+            </p>
+            {gamesSkipped.length > 0 && <p className="mt-2">No exact match: {gamesSkipped.join(", ")}</p>}
+            {gamesErrored.length > 0 && <p className="mt-2 text-danger">Errors: {gamesErrored.join(", ")}</p>}
+          </HighlightBox>
+        )}
+        <form action={syncGameLogs}>
+          <button
+            type="submit"
+            className="mt-2 rounded-lg bg-gold px-4 py-2 text-sm font-semibold text-navy-deep transition hover:bg-gold-bright"
+          >
+            Sync full season game logs
           </button>
         </form>
       </SectionCard>

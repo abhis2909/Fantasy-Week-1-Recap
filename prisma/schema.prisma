@@ -167,6 +167,7 @@ model Player {
   weeklyRosterSlots    WeeklyRosterSlot[]
   transactionPlayers   TransactionPlayer[]
   teamOfWeekSelections TeamOfWeekSelection[]
+  gameLogs             PlayerGameLog[]
 }
 
 /// Season-long "who owns this player" — distinct from the weekly
@@ -209,6 +210,25 @@ model StatLine {
   source     DataSource      @default(MANUAL)
 
   @@unique([weekId, playerId, categoryId])
+}
+
+/// One row per player per real NHL game — separate from StatLine (which is
+/// a per-fantasy-week aggregate). This is what makes "last 10 games" and
+/// per-game ratings possible without depending on the commissioner having
+/// run a weekly sync for every historical week; it's populated directly
+/// from the NHL API's per-player game log, independent of our own Week
+/// bookkeeping.
+model PlayerGameLog {
+  id       String     @id @default(cuid())
+  player   Player     @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  playerId String
+  gameDate DateTime
+  opponent String?
+  /// Raw per-category values for this single game, e.g. { "G": 1, "A": 2 }.
+  values   Json
+  source   DataSource @default(NHL_SYNC)
+
+  @@unique([playerId, gameDate])
 }
 
 model Matchup {
@@ -291,6 +311,8 @@ model TeamOfWeekSelection {
   playerId  String
   rawScore  Float
   zScore    Float?
+  /// 0-100, via the same z-score-to-rating scale as individual game ratings.
+  rating    Int      @default(50)
 
   @@unique([weekId, position, slotIndex])
 }

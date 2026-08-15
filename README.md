@@ -19,11 +19,12 @@ to someone) or to reach `/admin` as the commissioner.
 |---|---|
 | League standings (H2H Categories W-L-T) | `/standings`, `lib/standings.ts` |
 | Season-to-date category totals | `/categories`, `lib/standings.ts` |
-| Team of the Week (per-position z-score) | `/team-of-the-week`, `lib/team-of-week.ts` |
+| Team of the Week (per-position z-score, player cards w/ rating + stats) | `/team-of-the-week`, `lib/team-of-week.ts` |
 | Transactions + 1–10 peer ratings | `/transactions`, `lib/transactions.ts` |
 | Weekly recap newsletter | `/recaps`, `lib/recap/*` |
 | Commissioner data entry | `/admin/*` |
 | NHL player photos + auto-stat sync | `/admin/nhl-sync`, `lib/nhl.ts` |
+| Player cards: season totals, last 10 games, 0–100 rating | `/players`, `lib/playerRating.ts` |
 
 ## Getting started
 
@@ -166,6 +167,12 @@ with a key/ToS. Two independent actions:
   your lineup decisions, only real game results. Use the CSV upload
   afterward if you need to mark someone benched or correct a value; a later
   write to the same (week, player, category) always wins, from either path.
+- **Sync full season game logs**: for every rostered player, fetches their
+  entire season's NHL game log and upserts one `PlayerGameLog` row per game
+  (`playerId` + `gameDate` unique) — independent of the app's own Week
+  bookkeeping, so it works even for weeks the commissioner never explicitly
+  synced. This is what powers the individual player pages below; re-run it
+  periodically (it's a full upsert, safe to repeat) to pick up new games.
 
 **Caveat that matters**: the search/landing endpoint shapes were confirmed
 against a community API reference
@@ -179,6 +186,32 @@ to see a real player's actual JSON, and the field-name list in
 `lib/nhl.ts`'s `aggregateSkaterStats`/`aggregateGoalieStats` is the one
 place to fix if the real names differ.
 
+## Player pages & the 0–100 rating (`/players`)
+
+Every rostered player has a card (`components/totw/PlayerCard.tsx`) and a
+detail page (`/players/[playerId]`) showing:
+
+- **Season totals** per scoring category, summed from synced
+  `PlayerGameLog` rows (`lib/playerRating.ts`'s `seasonTotalsForPlayer` —
+  rate stats like GAA/SV% are averaged across games, not summed).
+- **Last 10 games**, each with a short stat line and a **0–100 rating**.
+
+The rating is the same z-score method used for Team of the Week
+(`lib/playerRating.ts`'s `ratingFromZ`: `z = 0` → 50, roughly ±1 standard
+deviation → ±15 points, clamped to 0–100), just applied per game instead of
+per fantasy week. For each of a player's games, `rateGamesForPlayer` builds
+a peer pool of every other currently-rostered player at the same position
+whose game fell in the same Monday-anchored calendar week, then scores that
+game's composite value against that pool. Games with fewer than 3 peers to
+compare against fall back to a coarse 40/50/60 (below/at/above a flat
+threshold) rather than a fabricated precise z-score — shown as "low sample"
+on the page. Team of the Week picks use the exact same `ratingFromZ` scale
+(`TeamOfWeekSelection.rating`), so a "72/100" means the same thing whether
+it's one game or a weekly pick.
+
+Requires the "Sync full season game logs" admin action above to have run at
+least once; until then, player pages show "no synced games yet."
+
 ## Design system
 
 "Royal Hockey": deep navy + gold, condensed bold uppercase display type
@@ -190,6 +223,13 @@ live in `app/globals.css`; reusable components in `components/ui/` and
 `components/totw/`. `--color-danger` is a separate, deliberately-not-gold
 token reserved for genuine error states (failed imports, form errors) so
 they never blend into the brand accent.
+
+Every `SectionCard` (i.e. most major content blocks on every page) fades
+and slides into view as it scrolls into the viewport, via
+`components/ui/Reveal.tsx` (a small `IntersectionObserver` wrapper — no
+animation library). Grids of player cards stagger in one-by-one. It
+respects `prefers-reduced-motion`. The page header (`PageHeader`) instead
+animates once on mount, since it's always already in view.
 
 An earlier iteration used a cream/red/blue palette pulled from a static
 mockup (`fantasywebsite/index.html`, preserved in git history at commit

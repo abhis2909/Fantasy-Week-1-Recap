@@ -158,6 +158,46 @@ export interface WeeklyNhlStatResult {
   gamesFound: number;
 }
 
+/** Per-category values for a single skater game-log entry. */
+function mapSkaterGameEntry(raw: Record<string, unknown>): Record<string, number> {
+  return {
+    G: num(raw, "goals"),
+    A: num(raw, "assists"),
+    "+/-": num(raw, "plusMinus"),
+    PIM: num(raw, "pim", "penaltyMinutes"),
+    PPP: num(raw, "powerPlayPoints", "ppPoints"),
+    SOG: num(raw, "shots", "shotsOnGoal", "sog"),
+    HIT: num(raw, "hits"),
+    BLK: num(raw, "blockedShots", "blocks"),
+  };
+}
+
+/** Per-category values for a single goalie game-log entry. */
+function mapGoalieGameEntry(raw: Record<string, unknown>): Record<string, number> {
+  const decision = String(raw.decision ?? "").toUpperCase();
+  const goalsAgainst = num(raw, "goalsAgainst");
+  const shotsAgainst = num(raw, "shotsAgainst", "shots");
+  return {
+    W: decision.startsWith("W") ? 1 : 0,
+    GAA: goalsAgainst,
+    "SV%": shotsAgainst > 0 ? Math.round(((shotsAgainst - goalsAgainst) / shotsAgainst) * 1000) / 1000 : 0,
+    SO: num(raw, "shutouts") > 0 ? 1 : 0,
+  };
+}
+
+/** Maps each game-log entry to its own per-category values — one row per
+ * game, for storing into PlayerGameLog. Games with no parseable date are
+ * dropped (can't be stored without one). */
+export function mapGameLogToPerGameValues(
+  entries: RawGameLogEntry[],
+  position: "G" | "SKATER"
+): { gameDate: string; values: Record<string, number> }[] {
+  const mapper = position === "G" ? mapGoalieGameEntry : mapSkaterGameEntry;
+  return entries
+    .filter((e): e is RawGameLogEntry & { gameDate: string } => e.gameDate !== null)
+    .map((e) => ({ gameDate: e.gameDate, values: mapper(e.raw) }));
+}
+
 export function aggregateSkaterStats(
   entries: RawGameLogEntry[],
   start: Date,
@@ -166,14 +206,8 @@ export function aggregateSkaterStats(
   const inRange = entries.filter((e) => gameDateInRange(e.gameDate, start, end));
   const values: Record<string, number> = { G: 0, A: 0, "+/-": 0, PIM: 0, PPP: 0, SOG: 0, HIT: 0, BLK: 0 };
   for (const e of inRange) {
-    values.G += num(e.raw, "goals");
-    values.A += num(e.raw, "assists");
-    values["+/-"] += num(e.raw, "plusMinus");
-    values.PIM += num(e.raw, "pim", "penaltyMinutes");
-    values.PPP += num(e.raw, "powerPlayPoints", "ppPoints");
-    values.SOG += num(e.raw, "shots", "shotsOnGoal", "sog");
-    values.HIT += num(e.raw, "hits");
-    values.BLK += num(e.raw, "blockedShots", "blocks");
+    const g = mapSkaterGameEntry(e.raw);
+    for (const key of Object.keys(values)) values[key] += g[key];
   }
   return { values, gamesFound: inRange.length };
 }
@@ -190,9 +224,11 @@ export function aggregateGoalieStats(
   let totalShotsAgainst = 0;
 
   for (const e of inRange) {
-    const decision = String(e.raw.decision ?? "").toUpperCase();
-    if (decision.startsWith("W")) wins += 1;
-    if (num(e.raw, "shutouts") > 0) shutouts += 1;
+    const g = mapGoalieGameEntry(e.raw);
+    wins += g.W;
+    shutouts += g.SO;
+    // Re-derive raw totals rather than re-summing the per-game SV% (percentages
+    // don't sum meaningfully) — pull straight from the entry again.
     totalGoalsAgainst += num(e.raw, "goalsAgainst");
     totalShotsAgainst += num(e.raw, "shotsAgainst", "shots");
   }
