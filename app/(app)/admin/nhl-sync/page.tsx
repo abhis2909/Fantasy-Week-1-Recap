@@ -13,23 +13,51 @@ import {
   getRawSearchJson,
   getTeamRoster,
   getRawTeamRosterJson,
+  getGameHitsAndBlocks,
+  getRawBoxscoreJson,
   aggregateSkaterStats,
   aggregateGoalieStats,
   mapGameLogToPerGameValues,
   mapWithConcurrency,
+  gameDateInRange,
+  gameIdOf,
   NHL_GAME_TYPE_REGULAR_SEASON,
   NHL_TEAM_ABBREVS,
+  type GameHitsBlocks,
 } from "@/lib/nhl";
 import { isLegacyFictionalName } from "@/lib/depthPlayerNames";
 import { renameLegacyFictionalPlayers } from "@/lib/playerCleanup";
 
-// Bulk-syncing a whole roster against an external API can run long —
-// each player needs 1-2 outbound requests. Raise the ceiling above
-// Vercel's default (this page's server actions inherit it too).
-export const maxDuration = 60;
+// Bulk-syncing a whole roster against an external API can run long — each
+// skater now needs one game-log request plus one boxscore request per
+// distinct game (hits/blocks aren't in the game-log response at all — see
+// lib/nhl.ts). A full-season sync across a real roster can mean hundreds
+// of boxscore calls, so this needs real headroom, not just "a bit above
+// the default." (This page's server actions inherit it too.)
+export const maxDuration = 300;
 
 function qs(params: Record<string, string | number>) {
   return new URLSearchParams(Object.fromEntries(Object.entries(params).map(([k, v]) => [k, String(v)]))).toString();
+}
+
+/** A gameId -> skater hits/blocks map, shared across every player processed
+ * in one sync run — many rostered players share NHL games (same team, or
+ * just an overlapping schedule), so this avoids re-fetching the same
+ * boxscore once per player. Not perfectly race-free under concurrency (two
+ * players hitting an uncached gameId at the same instant can both fetch
+ * once before either caches), but that's just a little wasted work, not a
+ * correctness problem — the shared prisma.playerGameLog upsert underneath
+ * is what actually needs to be safe to repeat, and it already is.
+ */
+function createBoxscoreCache() {
+  const cache = new Map<number, Map<number, GameHitsBlocks>>();
+  return async function cachedBoxscore(gameId: number): Promise<Map<number, GameHitsBlocks>> {
+    const existing = cache.get(gameId);
+    if (existing) return existing;
+    const fetched = await getGameHitsAndBlocks(gameId);
+    cache.set(gameId, fetched);
+    return fetched;
+  };
 }
 
 export default async function NhlSyncPage({
@@ -74,6 +102,10 @@ export default async function NhlSyncPage({
   const debugRosterTeam = Array.isArray(sp.debugRosterTeam) ? sp.debugRosterTeam[0] : sp.debugRosterTeam;
   const debugRosterResult = Array.isArray(sp.debugRosterResult) ? sp.debugRosterResult[0] : sp.debugRosterResult;
   const debugRosterError = Array.isArray(sp.debugRosterError) ? sp.debugRosterError[0] : sp.debugRosterError;
+
+  const debugBoxGameId = Array.isArray(sp.debugBoxGameId) ? sp.debugBoxGameId[0] : sp.debugBoxGameId;
+  const debugBoxResult = Array.isArray(sp.debugBoxResult) ? sp.debugBoxResult[0] : sp.debugBoxResult;
+  const debugBoxError = Array.isArray(sp.debugBoxError) ? sp.debugBoxError[0] : sp.debugBoxError;
 
   const gameLogCount = await prisma.playerGameLog.count();
 
@@ -132,6 +164,7 @@ export default async function NhlSyncPage({
       include: { player: true, team: true },
     });
 
+    const cachedBoxscore = createBoxscoreCache();
     let matched = 0;
     const skipped: string[] = [];
     const errored: string[] = [];
@@ -162,6 +195,31 @@ export default async function NhlSyncPage({
         if (result.gamesFound === 0) {
           skipped.push(`${player.fullName} (no games this week)`);
           return;
+        }
+
+        // Hits/blocks aren't in the game-log response at all — pull them
+        // from each in-range game's boxscore instead, for skaters only.
+        if (player.primaryPosition !== "G") {
+          const inRangeGameIds = gameLog
+            .filter((e) => gameDateInRange(e.gameDate, week.startDate, week.endDate))
+            .map((e) => gameIdOf(e));
+          let hits = 0;
+          let blockedShots = 0;
+          for (const gameId of inRangeGameIds) {
+            try {
+              const box = await cachedBoxscore(gameId);
+              const hb = box.get(nhlId);
+              if (hb) {
+                hits += hb.hits;
+                blockedShots += hb.blockedShots;
+              }
+            } catch {
+              // Leave this game's contribution at 0 rather than failing
+              // the whole player over one bad boxscore fetch.
+            }
+          }
+          result.values.HIT = hits;
+          result.values.BLK = blockedShots;
         }
 
         const categories = await prisma.scoringCategory.findMany({
@@ -203,6 +261,7 @@ export default async function NhlSyncPage({
       include: { player: true },
     });
     const seasonId = `${season.year}${season.year + 1}`;
+    const cachedBoxscore = createBoxscoreCache();
 
     let playersMatched = 0;
     let gamesUpserted = 0;
@@ -231,6 +290,26 @@ export default async function NhlSyncPage({
         if (perGame.length === 0) {
           skipped.push(`${player.fullName} (no games found)`);
           return;
+        }
+
+        // Hits/blocks aren't in the game-log response at all — pull them
+        // from each game's boxscore instead, for skaters only. Bounded
+        // concurrency within a player's own games on top of the outer
+        // per-player concurrency, since a full season can be 70+ games.
+        if (player.primaryPosition !== "G") {
+          await mapWithConcurrency(perGame, 4, async (g) => {
+            try {
+              const box = await cachedBoxscore(g.gameId);
+              const hb = box.get(nhlId);
+              if (hb) {
+                g.values.HIT = hb.hits;
+                g.values.BLK = hb.blockedShots;
+              }
+            } catch {
+              // Leave this game's HIT/BLK at 0 rather than failing the
+              // whole player over one bad boxscore fetch.
+            }
+          });
         }
 
         for (const g of perGame) {
@@ -338,6 +417,25 @@ export default async function NhlSyncPage({
     }
     redirect(
       `/admin/nhl-sync?${qs(result !== null ? { debugRosterTeam: team, debugRosterResult: result } : { debugRosterTeam: team, debugRosterError: error! })}`
+    );
+  }
+
+  async function debugBoxscorePreview(formData: FormData) {
+    "use server";
+    const gameIdRaw = (formData.get("debugBoxGameId") as string)?.trim();
+    if (!gameIdRaw) return;
+    let result: string | null = null;
+    let error: string | null = null;
+    try {
+      const gameId = Number(gameIdRaw);
+      if (!Number.isInteger(gameId)) throw new Error("Game ID must be a number.");
+      const raw = await getRawBoxscoreJson(gameId);
+      result = JSON.stringify(raw, null, 2).slice(0, 4000);
+    } catch (err) {
+      error = err instanceof Error ? err.message : "Unknown error";
+    }
+    redirect(
+      `/admin/nhl-sync?${qs(result !== null ? { debugBoxGameId: gameIdRaw, debugBoxResult: result } : { debugBoxGameId: gameIdRaw, debugBoxError: error! })}`
     );
   }
 
@@ -493,6 +591,13 @@ export default async function NhlSyncPage({
           last 10 games, and a 0-100 rating for each game based on a z-score against other
           rostered players at the same position that week.
         </p>
+        <p className="mb-4 text-cream/80">
+          Hits and Blocked Shots come from a second, per-<em>game</em> boxscore request (the
+          game-log endpoint above doesn&apos;t report either at all) — one extra request per
+          distinct game a rostered skater played, cached and reused across players who share a
+          game. For a full season across a real roster that can mean hundreds of extra requests,
+          so this can take a few minutes on a fresh run.
+        </p>
         {gamesMatched && (
           <HighlightBox title="Sync complete">
             <p>
@@ -569,6 +674,37 @@ export default async function NhlSyncPage({
         {debugRosterResult && (
           <pre className="max-h-96 overflow-auto rounded-lg bg-black/40 p-4 text-xs text-cream/90">
             {debugRosterResult}
+          </pre>
+        )}
+      </SectionCard>
+
+      <SectionCard title="Debug: preview a raw NHL boxscore response">
+        <p className="mb-3 text-sm text-cream/70">
+          Hits/Blocked Shots come from this endpoint — also unverified against a live response.
+          If they&apos;re still showing 0 after a sync, type a real NHL game ID here (find one in
+          the game-log debug box below — each game entry has a{" "}
+          <code className="text-white">gameId</code>) to see the real JSON, and the field names in{" "}
+          <code className="text-white">lib/nhl.ts</code>&apos;s <code className="text-white">getGameHitsAndBlocks</code>
+          /<code className="text-white">extractBoxscoreSkaters</code> are the ones to fix if they differ.
+        </p>
+        {debugBoxError && <HighlightBox title="Couldn't fetch">{debugBoxError}</HighlightBox>}
+        <form action={debugBoxscorePreview} className="mb-3 flex flex-wrap gap-3">
+          <input
+            name="debugBoxGameId"
+            defaultValue={debugBoxGameId}
+            placeholder="e.g. 2025021294"
+            className="w-48 rounded-lg border border-white/20 bg-white/10 px-3 py-2 text-white placeholder-cream/50"
+          />
+          <button
+            type="submit"
+            className="rounded-lg border-2 border-gold px-4 py-2 text-sm font-semibold text-gold transition hover:bg-gold/10"
+          >
+            Preview raw boxscore response
+          </button>
+        </form>
+        {debugBoxResult && (
+          <pre className="max-h-96 overflow-auto rounded-lg bg-black/40 p-4 text-xs text-cream/90">
+            {debugBoxResult}
           </pre>
         )}
       </SectionCard>

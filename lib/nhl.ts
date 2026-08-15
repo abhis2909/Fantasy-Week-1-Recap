@@ -97,15 +97,13 @@ export async function findBestNhlMatch(playerName: string): Promise<NhlSearchMat
 // ---------------------------------------------------------------------------
 // Game log / weekly stat aggregation
 //
-// IMPORTANT CAVEAT: unlike the search/landing endpoints above, this repo's
-// author (Claude) could not reach api-web.nhle.com from its sandbox to
-// verify the game-log response shape against a live call — the URL pattern
-// is confirmed against a community API reference, but the per-game field
-// names below (goals/assists/pim/etc.) are best-effort from prior knowledge,
-// not verified against a real response. `num()` tries a few plausible
-// spellings per stat to hedge, and getRawGameLogJson() below exists so the
-// first live run can be sanity-checked directly. Expect to need one round
-// of field-name fixes after the first real sync — see README.
+// Field names below are now confirmed against a live response: goals,
+// assists, powerPlayPoints, shots, pim, and shorthandedPoints all matched
+// on the first real skater game log pulled through the debug tool. One
+// confirmed gap: hits and blockedShots are simply not present anywhere in
+// this endpoint's response, for any player — see the boxscore section
+// further down, which exists specifically to fill that gap from a
+// different (per-game, not per-player) endpoint.
 // ---------------------------------------------------------------------------
 
 const gameLogUrl = (nhlPlayerId: number, seasonId: string, gameType: number) =>
@@ -166,10 +164,16 @@ function num(raw: Record<string, unknown>, ...keys: string[]): number {
   return 0;
 }
 
-function gameDateInRange(gameDate: string | null, start: Date, end: Date): boolean {
+export function gameDateInRange(gameDate: string | null, start: Date, end: Date): boolean {
   if (!gameDate) return false;
   const d = new Date(`${gameDate}T00:00:00Z`);
   return d >= start && d <= end;
+}
+
+/** The NHL game ID a raw game-log entry belongs to — needed to look up its
+ * boxscore for hits/blocks, which the game-log endpoint doesn't report. */
+export function gameIdOf(entry: RawGameLogEntry): number {
+  return num(entry.raw, "gameId");
 }
 
 export interface WeeklyNhlStatResult {
@@ -178,24 +182,20 @@ export interface WeeklyNhlStatResult {
   gamesFound: number;
 }
 
-/** Per-category values for a single skater game-log entry. */
+/** Per-category values for a single skater game-log entry. HIT/BLK are
+ * always 0 here — this endpoint doesn't report them at all (confirmed
+ * live) — callers that care about those two enrich them separately from
+ * getGameHitsAndBlocks below. */
 function mapSkaterGameEntry(raw: Record<string, unknown>): Record<string, number> {
   return {
     G: num(raw, "goals"),
     A: num(raw, "assists"),
     PPP: num(raw, "powerPlayPoints", "ppPoints"),
-    // Unverified against a live response like the rest of this file's
-    // field-name guesses (see the file-level caveat comment) — NHL's own
-    // stat pages call this "SH Points"/"shPoints" so that's the primary
-    // guess, with a goals+assists fallback in case the API only exposes
-    // the split components instead of a combined total.
-    SHP:
-      num(raw, "shorthandedPoints", "shPoints") ||
-      num(raw, "shorthandedGoals", "shGoals") + num(raw, "shorthandedAssists", "shAssists"),
+    SHP: num(raw, "shorthandedPoints", "shPoints"),
     SOG: num(raw, "shots", "shotsOnGoal", "sog"),
     PIM: num(raw, "pim", "penaltyMinutes"),
-    HIT: num(raw, "hits"),
-    BLK: num(raw, "blockedShots", "blocks"),
+    HIT: 0,
+    BLK: 0,
   };
 }
 
@@ -214,15 +214,17 @@ function mapGoalieGameEntry(raw: Record<string, unknown>): Record<string, number
 
 /** Maps each game-log entry to its own per-category values — one row per
  * game, for storing into PlayerGameLog. Games with no parseable date are
- * dropped (can't be stored without one). */
+ * dropped (can't be stored without one). gameId is included so callers can
+ * enrich HIT/BLK from getGameHitsAndBlocks afterward (skaters only — the
+ * mapper always returns 0 for those two, see mapSkaterGameEntry). */
 export function mapGameLogToPerGameValues(
   entries: RawGameLogEntry[],
   position: "G" | "SKATER"
-): { gameDate: string; values: Record<string, number> }[] {
+): { gameDate: string; gameId: number; values: Record<string, number> }[] {
   const mapper = position === "G" ? mapGoalieGameEntry : mapSkaterGameEntry;
   return entries
     .filter((e): e is RawGameLogEntry & { gameDate: string } => e.gameDate !== null)
-    .map((e) => ({ gameDate: e.gameDate, values: mapper(e.raw) }));
+    .map((e) => ({ gameDate: e.gameDate, gameId: gameIdOf(e), values: mapper(e.raw) }));
 }
 
 export function aggregateSkaterStats(
@@ -271,6 +273,78 @@ export function aggregateGoalieStats(
       : 0;
 
   return { values: { W: wins, GAA: gaa, "SV%": svPct, SO: shutouts }, gamesFound: inRange.length };
+}
+
+// ---------------------------------------------------------------------------
+// Per-game boxscore — the only source for hits and blocked shots, since the
+// game-log endpoint above doesn't report either (confirmed live). This is
+// keyed by *game*, not by player: one boxscore lists every skater on both
+// teams, so callers syncing multiple rostered players should fetch each
+// distinct gameId once and reuse it, not call this once per player per
+// game — see the shared cache in the admin page's sync actions.
+//
+// UNVERIFIED shape — same caveat as the roster endpoint: best-effort guess
+// from the community API reference, not confirmed against a live response.
+// Use getRawBoxscoreJson via the debug tool if hits/blocks come back wrong
+// or every game errors out.
+// ---------------------------------------------------------------------------
+
+const boxscoreUrl = (gameId: number) => `https://api-web.nhle.com/v1/gamecenter/${gameId}/boxscore`;
+
+export interface GameHitsBlocks {
+  hits: number;
+  blockedShots: number;
+}
+
+const BoxscoreSkaterStatSchema = z
+  .object({
+    playerId: z.coerce.number(),
+    hits: z.number().optional(),
+    blockedShots: z.number().optional(),
+  })
+  .passthrough();
+
+/** playerByGameStats splits skaters into forwards/defense per team — pull
+ * every skater group from both sides into one flat list. */
+function extractBoxscoreSkaters(json: Record<string, unknown>): unknown[] {
+  const stats = json.playerByGameStats as Record<string, unknown> | undefined;
+  if (!stats) return [];
+  const sides = ["homeTeam", "awayTeam"] as const;
+  const groups = ["forwards", "defense"] as const;
+  const all: unknown[] = [];
+  for (const side of sides) {
+    const team = stats[side] as Record<string, unknown> | undefined;
+    if (!team) continue;
+    for (const group of groups) {
+      if (Array.isArray(team[group])) all.push(...(team[group] as unknown[]));
+    }
+  }
+  return all;
+}
+
+/** Every skater's hits/blockedShots for one game, keyed by NHL player ID. */
+export async function getGameHitsAndBlocks(gameId: number): Promise<Map<number, GameHitsBlocks>> {
+  const res = await fetch(boxscoreUrl(gameId), { headers: { Accept: "application/json" } });
+  if (!res.ok) throw new Error(`NHL boxscore request failed for game ${gameId} (${res.status})`);
+  const json = (await res.json()) as Record<string, unknown>;
+  const skaters = extractBoxscoreSkaters(json);
+  const parsed = z.array(BoxscoreSkaterStatSchema).safeParse(skaters);
+  if (!parsed.success) {
+    throw new Error(`Unexpected response shape from NHL boxscore API for game ${gameId}`);
+  }
+  const map = new Map<number, GameHitsBlocks>();
+  for (const p of parsed.data) {
+    map.set(p.playerId, { hits: p.hits ?? 0, blockedShots: p.blockedShots ?? 0 });
+  }
+  return map;
+}
+
+/** For live debugging: the untouched parsed JSON body from a game's
+ * boxscore endpoint, no schema validation. */
+export async function getRawBoxscoreJson(gameId: number): Promise<unknown> {
+  const res = await fetch(boxscoreUrl(gameId), { headers: { Accept: "application/json" } });
+  if (!res.ok) throw new Error(`NHL boxscore request failed for game ${gameId} (${res.status})`);
+  return res.json();
 }
 
 // ---------------------------------------------------------------------------

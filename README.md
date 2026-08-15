@@ -228,21 +228,41 @@ with a key/ToS.
   at all) — if every team errors out, use the **"Debug: preview a raw NHL
   roster response"** box to see the real JSON and fix `getTeamRoster`.
 
-**Search endpoint shape is now verified against a live response**: it
-returns `playerId` as a numeric *string* (e.g. `"8478402"`), not a number —
-`lib/nhl.ts` coerces it. (This sandbox has no network access to
-`nhle.com`, so it took a round-trip through the debug tool below to catch —
-worth remembering if the API shape drifts again later.)
+**Search and game-log endpoint shapes are now verified against live
+responses.** Search returns `playerId` as a numeric *string* (e.g.
+`"8478402"`), not a number — `lib/nhl.ts` coerces it. The skater game-log
+endpoint's field names for Goals/Assists/PPP/SOG/PIM/SHP (`goals`,
+`assists`, `powerPlayPoints`, `shots`, `pim`, `shorthandedPoints`) all
+matched the first real guess. (This sandbox has no network access to
+`nhle.com`, so both of these took a round-trip through the debug tools —
+type a name into the box, paste back the JSON — worth remembering if the
+API shape ever drifts again.)
 
-**Caveat that still applies**: the per-game **stat field names** used by
-weekly sync and full-season game-log sync (`goals`, `assists`, `pim`,
-`powerPlayPoints`, etc.) are still a best-effort guess, unverified against a
-live game-log response. If synced numbers look wrong (all zero is the
-likely symptom), use the **"Debug: preview a raw NHL search response"** or
-**"...game-log response"** boxes on that page to see the real JSON, and the
-field-name list in `lib/nhl.ts`'s `aggregateSkaterStats`/
-`aggregateGoalieStats`/`mapSkaterGameEntry`/`mapGoalieGameEntry` is the one
-place to fix if the real names differ.
+**Confirmed gap: Hits and Blocked Shots are not in the game-log response at
+all**, for any player — every other field is there, those two just aren't.
+They come from a second, different endpoint instead: a per-*game* boxscore
+(`lib/nhl.ts`'s `getGameHitsAndBlocks`, one call per distinct `gameId`,
+cached and reused across every rostered player who shares that game — a
+boxscore lists every skater on both teams, so there's no reason to fetch
+the same game twice). Both **weekly stat sync** and **full-season game-log
+sync** call it for skaters. This endpoint's shape is **unverified** like
+the roster endpoint — if hits/blocks come back wrong or every game errors
+out, use the **"Debug: preview a raw NHL boxscore response"** box (a
+`gameId` — visible in any game-log debug preview's entries — not a player
+name) to see the real JSON, and `getGameHitsAndBlocks`/
+`extractBoxscoreSkaters` are the ones to fix.
+
+One extra API call per distinct game (not per player) adds up on a full
+season sync across a real roster — potentially hundreds of extra requests
+— so `maxDuration` on this page is 300s and a fresh full-season sync can
+take a few minutes. It's a safe upsert per game, so a partial timeout just
+means fewer games got the hits/blocks enrichment on that run; re-running
+picks up where it left off (already-cached boxscores just get re-fetched,
+nothing is lost).
+
+Goalie stats (Wins/GAA/SV%/Shutouts) are unaffected by any of this — those
+come entirely from the game-log endpoint's own fields
+(`mapGoalieGameEntry`), no boxscore needed.
 
 **If a server action button gives an error right after a new deploy**: this
 is almost always a stale page — Next.js embeds a hashed ID for each server
