@@ -168,6 +168,11 @@ model Player {
   externalSource  DataSource @default(MANUAL)
   externalId      String?
   photoUrl        String?
+  /// Current NHL team's 3-letter abbreviation (e.g. "EDM") — populated by
+  /// NHL sync (search match / roster import), used to theme the player
+  /// card in that team's colors (lib/nhlTeamColors.ts). Not the fantasy
+  /// team — that's RosterEntry.teamId.
+  nhlTeamAbbrev   String?
 
   statLines            StatLine[]
   rosterEntries        RosterEntry[]
@@ -175,6 +180,7 @@ model Player {
   transactionPlayers   TransactionPlayer[]
   teamOfWeekSelections TeamOfWeekSelection[]
   gameLogs             PlayerGameLog[]
+  seasonRating         PlayerSeasonRating?
 }
 
 /// Season-long "who owns this player" — distinct from the weekly
@@ -236,6 +242,29 @@ model PlayerGameLog {
   source   DataSource @default(NHL_SYNC)
 
   @@unique([playerId, gameDate])
+}
+
+/// The "Ultimate Team"-style card score — one row per player, recomputed in
+/// place (not historized) each time the commissioner runs "Update season
+/// card scores". Starts as last season's rating and blends toward this
+/// season's actual performance as the season progresses — see
+/// lib/playerRating.ts's seasonBlendWeight. Deliberately separate from the
+/// per-game/per-week ratings (PlayerGameLog rows, TeamOfWeekSelection) —
+/// this is the stable "how good is this player this year" number the card
+/// shows, not a volatile single-game/single-week snapshot.
+model PlayerSeasonRating {
+  id                  String   @id @default(cuid())
+  player              Player   @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  playerId            String   @unique
+  /// 0-100, the position-weighted blend of all categoryScores below.
+  overall             Int
+  /// Per-category 0-100 sub-scores, e.g. { "G": 82, "A": 75, "HIT": 40 }.
+  categoryScores      Json
+  /// 0 = pure last-season baseline, 1 = pure this-season-to-date. Recorded
+  /// (not just derived at read time) so the card can show its own basis
+  /// honestly even if last season's raw data becomes unavailable later.
+  currentSeasonWeight Float    @default(0)
+  updatedAt           DateTime @updatedAt
 }
 
 model Matchup {

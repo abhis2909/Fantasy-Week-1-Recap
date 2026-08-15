@@ -27,6 +27,7 @@ import {
 } from "@/lib/nhl";
 import { isLegacyFictionalName } from "@/lib/depthPlayerNames";
 import { renameLegacyFictionalPlayers } from "@/lib/playerCleanup";
+import { sumGameLogValues, blendedSeasonScores, seasonBlendWeight } from "@/lib/playerRating";
 
 // Bulk-syncing a whole roster against an external API can run long — each
 // skater now needs one game-log request plus one boxscore request per
@@ -107,7 +108,13 @@ export default async function NhlSyncPage({
   const debugBoxResult = Array.isArray(sp.debugBoxResult) ? sp.debugBoxResult[0] : sp.debugBoxResult;
   const debugBoxError = Array.isArray(sp.debugBoxError) ? sp.debugBoxError[0] : sp.debugBoxError;
 
+  const seasonScoresUpdated = Array.isArray(sp.seasonScoresUpdated) ? sp.seasonScoresUpdated[0] : sp.seasonScoresUpdated;
+  const seasonScoresBlendPct = Array.isArray(sp.seasonScoresBlendPct) ? sp.seasonScoresBlendPct[0] : sp.seasonScoresBlendPct;
+  const seasonScoresSkipped = (Array.isArray(sp.seasonScoresSkipped) ? sp.seasonScoresSkipped : sp.seasonScoresSkipped ? [sp.seasonScoresSkipped] : []) as string[];
+  const seasonScoresErrored = (Array.isArray(sp.seasonScoresErrored) ? sp.seasonScoresErrored : sp.seasonScoresErrored ? [sp.seasonScoresErrored] : []) as string[];
+
   const gameLogCount = await prisma.playerGameLog.count();
+  const seasonRatingCount = await prisma.playerSeasonRating.count();
 
   async function cleanupFictionalNames() {
     "use server";
@@ -139,6 +146,7 @@ export default async function NhlSyncPage({
             photoUrl: headshot ?? player.photoUrl,
             externalId: String(match.nhlPlayerId),
             externalSource: "NHL_SYNC",
+            nhlTeamAbbrev: match.teamAbbrev ?? player.nhlTeamAbbrev,
           },
         });
         matched++;
@@ -182,7 +190,11 @@ export default async function NhlSyncPage({
           nhlId = match.nhlPlayerId;
           await prisma.player.update({
             where: { id: player.id },
-            data: { externalId: String(nhlId), externalSource: "NHL_SYNC" },
+            data: {
+              externalId: String(nhlId),
+              externalSource: "NHL_SYNC",
+              nhlTeamAbbrev: match.teamAbbrev ?? player.nhlTeamAbbrev,
+            },
           });
         }
 
@@ -281,7 +293,11 @@ export default async function NhlSyncPage({
           nhlId = match.nhlPlayerId;
           await prisma.player.update({
             where: { id: player.id },
-            data: { externalId: String(nhlId), externalSource: "NHL_SYNC" },
+            data: {
+              externalId: String(nhlId),
+              externalSource: "NHL_SYNC",
+              nhlTeamAbbrev: match.teamAbbrev ?? player.nhlTeamAbbrev,
+            },
           });
         }
 
@@ -338,6 +354,104 @@ export default async function NhlSyncPage({
   }
 
   /**
+   * Recomputes each rostered player's "Ultimate Team"-style season card
+   * score — last season's rating blended toward this season's actual
+   * performance as the calendar moves through the season (see
+   * lib/playerRating.ts's seasonBlendWeight/blendedSeasonScores). Meant to
+   * be re-run roughly monthly; it's a plain recompute-and-overwrite each
+   * time (not incremental), so running it any time is safe and just
+   * refreshes both the blend weight and the underlying data.
+   */
+  async function updateSeasonCardScores() {
+    "use server";
+    const activeRoster = await prisma.rosterEntry.findMany({
+      where: { droppedAt: null, team: { seasonId: season.id } },
+      include: { player: true },
+    });
+    const lastSeasonId = `${season.year - 1}${season.year}`;
+    const currentWeight = seasonBlendWeight(new Date(), season.year);
+
+    let updated = 0;
+    const skipped: string[] = [];
+    const errored: string[] = [];
+
+    await mapWithConcurrency(activeRoster, 6, async (entry) => {
+      const player = entry.player;
+      try {
+        let nhlId = player.externalId ? Number(player.externalId) : null;
+        if (!nhlId) {
+          const match = await findBestNhlMatch(player.fullName);
+          if (!match) {
+            skipped.push(player.fullName);
+            return;
+          }
+          nhlId = match.nhlPlayerId;
+          await prisma.player.update({
+            where: { id: player.id },
+            data: {
+              externalId: String(nhlId),
+              externalSource: "NHL_SYNC",
+              nhlTeamAbbrev: match.teamAbbrev ?? player.nhlTeamAbbrev,
+            },
+          });
+        }
+
+        // Last season: fetched fresh each run, not persisted to
+        // PlayerGameLog — this is a baseline for the blend, not part of
+        // the "last 10 games" per-game history. HIT/BLK deliberately
+        // dropped: getting real per-game hits/blocks needs a boxscore call
+        // per game (see lib/nhl.ts), and doing that for a whole prior
+        // season across a full roster is too expensive for an admin
+        // button — blendedSeasonScores falls back to each category's
+        // baseline for exactly this case rather than wrongly treating it
+        // as a real zero.
+        const lastSeasonGameLog = await getPlayerGameLog(nhlId, lastSeasonId, NHL_GAME_TYPE_REGULAR_SEASON);
+        const lastSeasonPerGame = mapGameLogToPerGameValues(
+          lastSeasonGameLog,
+          player.primaryPosition === "G" ? "G" : "SKATER"
+        );
+        const lastSeasonTotals = sumGameLogValues(lastSeasonPerGame);
+        if (player.primaryPosition !== "G") {
+          delete lastSeasonTotals.HIT;
+          delete lastSeasonTotals.BLK;
+        }
+
+        // This season: whatever's already in PlayerGameLog from "Sync full
+        // season game logs" — which does include real boxscore-enriched
+        // HIT/BLK, so those come back for real once this season's data
+        // starts carrying weight in the blend.
+        const thisSeasonGameLogs = await prisma.playerGameLog.findMany({ where: { playerId: player.id } });
+        const thisSeasonTotals = sumGameLogValues(thisSeasonGameLogs);
+
+        const { categoryScores, overall } = blendedSeasonScores(
+          lastSeasonTotals,
+          lastSeasonPerGame.length,
+          thisSeasonTotals,
+          thisSeasonGameLogs.length,
+          player.primaryPosition,
+          currentWeight
+        );
+
+        await prisma.playerSeasonRating.upsert({
+          where: { playerId: player.id },
+          create: { playerId: player.id, overall, categoryScores, currentSeasonWeight: currentWeight },
+          update: { overall, categoryScores, currentSeasonWeight: currentWeight },
+        });
+        updated++;
+      } catch (err) {
+        errored.push(`${player.fullName} (${err instanceof Error ? err.message : "unknown error"})`);
+      }
+    });
+
+    revalidatePath("/admin/nhl-sync");
+    revalidatePath("/players");
+    revalidatePath("/team-of-the-week");
+    redirect(
+      `/admin/nhl-sync?${qs({ seasonScoresUpdated: updated, seasonScoresBlendPct: Math.round(currentWeight * 100) })}${skipped.map((n) => `&seasonScoresSkipped=${encodeURIComponent(n)}`).join("")}${errored.map((n) => `&seasonScoresErrored=${encodeURIComponent(n)}`).join("")}`
+    );
+  }
+
+  /**
    * Pre-loads every current NHL player as a free agent — ahead of actually
    * needing them, so the pool is ready once a real add/drop or a future
    * Yahoo sync needs to find someone who isn't already on a fantasy roster.
@@ -371,6 +485,7 @@ export default async function NhlSyncPage({
                 externalId,
                 photoUrl: p.headshot ?? existingByName.photoUrl,
                 externalSource: "NHL_SYNC",
+                nhlTeamAbbrev: teamAbbrev,
               },
             });
             byExternalId.set(externalId, existingByName);
@@ -385,6 +500,7 @@ export default async function NhlSyncPage({
               externalId,
               photoUrl: p.headshot,
               externalSource: "NHL_SYNC",
+              nhlTeamAbbrev: teamAbbrev,
             },
           });
           byExternalId.set(externalId, created_);
@@ -588,8 +704,8 @@ export default async function NhlSyncPage({
         <p className="mb-4 text-cream/80">
           {gameLogCount} game{gameLogCount === 1 ? "" : "s"} stored across all players. Powers
           the per-player pages (<code className="text-gold">/players</code>) — season totals,
-          last 10 games, and a 0-100 rating for each game based on a z-score against other
-          rostered players at the same position that week.
+          last 10 games, and a 0-100 rating for each game via the fixed-weight valuation model
+          (<code className="text-gold">lib/playerRating.ts</code>).
         </p>
         <p className="mb-4 text-cream/80">
           Hits and Blocked Shots come from a second, per-<em>game</em> boxscore request (the
@@ -614,6 +730,41 @@ export default async function NhlSyncPage({
             className="mt-2 rounded-lg bg-gold px-4 py-2 text-sm font-semibold text-navy-deep transition hover:bg-gold-bright"
           >
             Sync full season game logs
+          </button>
+        </form>
+      </SectionCard>
+
+      <SectionCard title="Player card scores">
+        <p className="mb-4 text-cream/80">
+          {seasonRatingCount} of {players.length} players have a card score. This is the
+          &quot;Ultimate Team&quot;-style overall + per-category rating shown on player cards —
+          separate from the per-game ratings above. It starts as last season&apos;s rating and
+          blends toward this season&apos;s actual performance as the season progresses (currently{" "}
+          {Math.round(seasonBlendWeight(new Date(), season.year) * 100)}% this season, the rest
+          last season) — re-run this roughly monthly to keep that blend and the underlying stats
+          current. Requires last season&apos;s game log, so it makes one extra NHL request per
+          rostered player on top of whatever &quot;Sync full season game logs&quot; already did.
+        </p>
+        {seasonScoresUpdated && (
+          <HighlightBox title="Update complete">
+            <p>
+              Updated {seasonScoresUpdated} player{seasonScoresUpdated === "1" ? "" : "s"} —{" "}
+              {seasonScoresBlendPct}% weighted toward this season.
+            </p>
+            {seasonScoresSkipped.length > 0 && (
+              <p className="mt-2">No exact match: {seasonScoresSkipped.join(", ")}</p>
+            )}
+            {seasonScoresErrored.length > 0 && (
+              <p className="mt-2 text-danger">Errors: {seasonScoresErrored.join(", ")}</p>
+            )}
+          </HighlightBox>
+        )}
+        <form action={updateSeasonCardScores}>
+          <button
+            type="submit"
+            className="mt-2 rounded-lg bg-gold px-4 py-2 text-sm font-semibold text-navy-deep transition hover:bg-gold-bright"
+          >
+            Update season card scores
           </button>
         </form>
       </SectionCard>

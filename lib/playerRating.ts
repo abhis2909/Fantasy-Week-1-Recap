@@ -73,6 +73,17 @@ export function ratingForValues(
   };
 }
 
+/** Sums raw per-category values across a set of PlayerGameLog-shaped rows. */
+export function sumGameLogValues(gameLogs: { values: unknown }[]): Record<string, number> {
+  const totals: Record<string, number> = {};
+  for (const log of gameLogs) {
+    for (const [code, value] of Object.entries(log.values as Record<string, number>)) {
+      totals[code] = (totals[code] ?? 0) + value;
+    }
+  }
+  return totals;
+}
+
 /** A typical NHL week's game count — used only as a scaling fallback when
  * there's no real per-game data to count from (see weeklyValuesAndGameCount
  * below), so a weekly rating still has a sane baseline/stdDev to compare
@@ -94,13 +105,7 @@ export function weeklyValuesAndGameCount(
   statLines: { value: number; category: { code: string } }[]
 ): { values: Record<string, number>; gamesPlayed: number } {
   if (gameLogsInWeek.length > 0) {
-    const values: Record<string, number> = {};
-    for (const log of gameLogsInWeek) {
-      for (const [code, value] of Object.entries(log.values as Record<string, number>)) {
-        values[code] = (values[code] ?? 0) + value;
-      }
-    }
-    return { values, gamesPlayed: gameLogsInWeek.length };
+    return { values: sumGameLogValues(gameLogsInWeek), gamesPlayed: gameLogsInWeek.length };
   }
   const values: Record<string, number> = {};
   for (const sl of statLines) values[sl.category.code] = sl.value;
@@ -139,16 +144,200 @@ export async function seasonTotalsForPlayer(playerId: string): Promise<{
   totals: Record<string, number>;
 }> {
   const gameLogs = await prisma.playerGameLog.findMany({ where: { playerId } });
-  const totals: Record<string, number> = {};
-  for (const g of gameLogs) {
-    for (const [code, value] of Object.entries(g.values as Record<string, number>)) {
-      totals[code] = (totals[code] ?? 0) + value;
-    }
-  }
+  const totals = sumGameLogValues(gameLogs);
   const gamesPlayed = gameLogs.length;
   if (gamesPlayed > 0) {
     if (typeof totals.GAA === "number") totals.GAA = Math.round((totals.GAA / gamesPlayed) * 100) / 100;
     if (typeof totals["SV%"] === "number") totals["SV%"] = Math.round((totals["SV%"] / gamesPlayed) * 1000) / 1000;
   }
   return { gamesPlayed, totals };
+}
+
+// ---------------------------------------------------------------------------
+// Season card score — the "Ultimate Team"-style overall + per-category
+// sub-scores shown on PlayerCard, distinct from the per-game/per-week
+// ratings above. Starts as last season's rating and blends toward this
+// season's actual performance as the season progresses (see
+// seasonBlendWeight), recomputed on demand by the "Update season card
+// scores" admin action rather than per-game.
+// ---------------------------------------------------------------------------
+
+interface CategoryCalibration {
+  /** Typical per-game-average value across a realistic rostered-player
+   * population — NOT a per-game raw-score baseline like SKATER_BASELINE_PER_GAME
+   * above; this is per individual category, in that category's own units. */
+  baseline: number;
+  stdDev: number;
+  higherIsBetter: boolean;
+}
+
+/** Hand-calibrated from general knowledge of realistic per-game rates for a
+ * rostered (i.e. already above-replacement-level) NHL skater — there's no
+ * league-wide data source wired up to derive these empirically. Reasonable
+ * starting points, easiest single place to retune once real full-season
+ * data makes the card scores feel too generous/harsh in practice. */
+// stdDev values are tuned tighter than a "pure" statistical spread would
+// suggest, deliberately — the point of an Ultimate-Team-style card is
+// visible separation between a genuine top performer and a replacement-level
+// one (think HUT/FUT gold vs bronze), not a strict bell curve where nearly
+// everyone rostered lands within a few points of 50.
+const SKATER_CATEGORY_CALIBRATION: Record<string, CategoryCalibration> = {
+  G: { baseline: 0.22, stdDev: 0.12, higherIsBetter: true },
+  A: { baseline: 0.32, stdDev: 0.15, higherIsBetter: true },
+  PPP: { baseline: 0.14, stdDev: 0.1, higherIsBetter: true },
+  SHP: { baseline: 0.02, stdDev: 0.04, higherIsBetter: true },
+  SOG: { baseline: 2.1, stdDev: 0.65, higherIsBetter: true },
+  HIT: { baseline: 1.4, stdDev: 0.85, higherIsBetter: true },
+  BLK: { baseline: 0.9, stdDev: 0.6, higherIsBetter: true },
+  PIM: { baseline: 0.5, stdDev: 0.45, higherIsBetter: true },
+};
+
+const GOALIE_CATEGORY_CALIBRATION: Record<string, CategoryCalibration> = {
+  // A per-appearance win rate (0-1), not a count — same "totals / games"
+  // math as every other category here works fine for a rate stat too.
+  W: { baseline: 0.45, stdDev: 0.2, higherIsBetter: true },
+  SV: { baseline: 24, stdDev: 5.5, higherIsBetter: true },
+  GA: { baseline: 2.7, stdDev: 0.5, higherIsBetter: false },
+  SO: { baseline: 0.08, stdDev: 0.08, higherIsBetter: true },
+};
+
+function categoryCalibrationFor(position: Position): Record<string, CategoryCalibration> {
+  return position === "G" ? GOALIE_CATEGORY_CALIBRATION : SKATER_CATEGORY_CALIBRATION;
+}
+
+/**
+ * Ordered category codes for a position's season card, e.g. ["G", "A",
+ * "PPP", ...]. Exported so PlayerCard doesn't need its own duplicate list —
+ * and, importantly, can't just `Object.keys()` a stored PlayerSeasonRating.
+ * categoryScores itself, since Postgres jsonb doesn't preserve the original
+ * key insertion order on round-trip.
+ */
+export function categoryCodesForPosition(position: Position): string[] {
+  return Object.keys(categoryCalibrationFor(position));
+}
+
+/** One category's 0-100 sub-score from its per-game average, honoring
+ * higherIsBetter (GA needs lower-is-better standardization, same as GAA
+ * does for Standings). */
+function categoryScore(perGameAvg: number, calib: CategoryCalibration): number {
+  const sign = calib.higherIsBetter ? 1 : -1;
+  return standardizeRating(sign * perGameAvg, sign * calib.baseline, calib.stdDev);
+}
+
+/**
+ * How much each category counts toward the overall card score, by position
+ * — this is where "defensemen should weight blocks/hits/PIM more heavily"
+ * lives. Forwards (C/LW/RW) share one profile emphasizing offense; D shifts
+ * weight toward the physical/defensive categories; goalies are separate
+ * entirely. Weights don't need to sum to 1 — overallFromCategoryScores
+ * normalizes by whatever weights are actually present.
+ */
+const FORWARD_EMPHASIS: Record<string, number> = {
+  G: 0.22,
+  A: 0.2,
+  PPP: 0.14,
+  SHP: 0.06,
+  SOG: 0.16,
+  HIT: 0.08,
+  BLK: 0.06,
+  PIM: 0.08,
+};
+const DEFENSE_EMPHASIS: Record<string, number> = {
+  G: 0.1,
+  A: 0.16,
+  PPP: 0.1,
+  SHP: 0.04,
+  SOG: 0.12,
+  HIT: 0.17,
+  BLK: 0.19,
+  PIM: 0.12,
+};
+const GOALIE_EMPHASIS: Record<string, number> = { W: 0.35, SV: 0.2, GA: 0.3, SO: 0.15 };
+
+function emphasisFor(position: Position): Record<string, number> {
+  if (position === "G") return GOALIE_EMPHASIS;
+  return position === "D" ? DEFENSE_EMPHASIS : FORWARD_EMPHASIS;
+}
+
+/** Weighted average of per-category 0-100 scores into one overall 0-100. */
+export function overallFromCategoryScores(
+  categoryScores: Record<string, number>,
+  position: Position
+): number {
+  const emphasis = emphasisFor(position);
+  let weightedSum = 0;
+  let totalWeight = 0;
+  for (const [code, weight] of Object.entries(emphasis)) {
+    const score = categoryScores[code];
+    if (score === undefined) continue;
+    weightedSum += score * weight;
+    totalWeight += weight;
+  }
+  return totalWeight > 0 ? Math.round(weightedSum / totalWeight) : 50;
+}
+
+/**
+ * Blends last season's per-game averages with this season's (weighted by
+ * currentWeight, 0 = pure last season, 1 = pure this season) and
+ * standardizes the blend into per-category 0-100 scores plus an overall.
+ *
+ * Falls back to that category's own baseline — a neutral ~50, not a
+ * punishing 0 — whenever a specific category's total is genuinely absent
+ * (the key missing from the totals object) rather than present-and-zero.
+ * This matters for two real cases, not just a hypothetical: a true rookie
+ * with no last-season data at all, and — currently — HIT/BLK specifically,
+ * which the season-card computation deliberately omits from the
+ * *last*-season totals (getting real last-season hits/blocks would mean a
+ * boxscore call per game across a whole prior season, per rostered player —
+ * too expensive to run from an admin button) while still using real
+ * game-log data for the other six categories. A category with no
+ * this-season data yet (start of the season, before any games) falls back
+ * to the last-season average regardless of currentWeight, so the card
+ * doesn't get pulled toward a fabricated zero just because the calendar has
+ * ticked forward.
+ */
+export function blendedSeasonScores(
+  lastSeasonTotals: Record<string, number>,
+  lastSeasonGames: number,
+  thisSeasonTotals: Record<string, number>,
+  thisSeasonGames: number,
+  position: Position,
+  currentWeight: number
+): { categoryScores: Record<string, number>; overall: number } {
+  const calibration = categoryCalibrationFor(position);
+  const categoryScores: Record<string, number> = {};
+  for (const [code, calib] of Object.entries(calibration)) {
+    const lastAvg =
+      lastSeasonGames > 0 && lastSeasonTotals[code] !== undefined
+        ? lastSeasonTotals[code] / lastSeasonGames
+        : calib.baseline;
+    const thisAvg =
+      thisSeasonGames > 0 && thisSeasonTotals[code] !== undefined
+        ? thisSeasonTotals[code] / thisSeasonGames
+        : lastAvg;
+    const blendedAvg = lastAvg * (1 - currentWeight) + thisAvg * currentWeight;
+    categoryScores[code] = categoryScore(blendedAvg, calib);
+  }
+  return { categoryScores, overall: overallFromCategoryScores(categoryScores, position) };
+}
+
+const SEASON_START_MONTH_INDEX = 9; // October, 0-indexed (Date.getUTCMonth())
+const SEASON_LENGTH_MONTHS = 7; // October through April
+
+/**
+ * How much of the season-card blend should be "this season" rather than
+ * "last season," derived from the calendar rather than from how many times
+ * the admin action has been clicked — 0 in the offseason/at puck drop,
+ * ramping linearly to 1 by ~7 months into the season (per the user's
+ * choice: shift toward this season over time rather than snapping over the
+ * moment any current data exists). Re-running the update just recomputes
+ * this fresh each time from today's date, so it's always correct for
+ * wherever the calendar actually is, regardless of update cadence.
+ */
+export function seasonBlendWeight(today: Date, seasonStartCalendarYear: number): number {
+  const seasonStart = new Date(Date.UTC(seasonStartCalendarYear, SEASON_START_MONTH_INDEX, 1));
+  const monthsElapsed =
+    (today.getUTCFullYear() - seasonStart.getUTCFullYear()) * 12 +
+    (today.getUTCMonth() - seasonStart.getUTCMonth());
+  return Math.max(0, Math.min(1, monthsElapsed / SEASON_LENGTH_MONTHS));
 }

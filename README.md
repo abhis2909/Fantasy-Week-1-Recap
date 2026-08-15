@@ -24,7 +24,8 @@ to someone) or to reach `/admin` as the commissioner.
 | Weekly recap newsletter | `/recaps`, `lib/recap/*` |
 | Commissioner data entry | `/admin/*` |
 | NHL player photos + auto-stat sync | `/admin/nhl-sync`, `lib/nhl.ts` |
-| Player cards: season totals, last 10 games, 0–100 rating | `/players`, `lib/playerRating.ts` |
+| "Ultimate Team"-style player cards: season overall + per-category scores, team-colored, season totals, last 10 games | `/players`, `components/players/SeasonCard.tsx`, `lib/playerRating.ts` |
+| Yahoo Fantasy API integration (OAuth2 scaffolding only, not wired up) | `lib/yahoo.ts` |
 
 ## Getting started
 
@@ -117,6 +118,11 @@ change their own password — see the follow-ups below.
   are structured (`type`, `title`, `body`), not one HTML blob, so a future
   PDF export or a redesign can render them without reverse-engineering
   markup.
+- **PlayerGameLog** is one row per player per real NHL game (independent of
+  the app's own Week bookkeeping) — powers "last 10 games" and per-game
+  ratings. **PlayerSeasonRating** is the derived, recomputed-in-place
+  "Ultimate Team" card score built from it — see "Player pages & ratings"
+  below for both.
 - Every row that could plausibly come from a Yahoo sync one day
   (`Team.externalSource`, `Player.externalSource`, `StatLine.source`, …)
   already carries a `DataSource` (`MANUAL | CSV_IMPORT | YAHOO_SYNC`) —
@@ -215,6 +221,15 @@ with a key/ToS.
   bookkeeping, so it works even for weeks the commissioner never explicitly
   synced. This is what powers the individual player pages below; re-run it
   periodically (it's a full upsert, safe to repeat) to pick up new games.
+- **Update season card scores**: recomputes every rostered player's
+  `PlayerSeasonRating` — the "Ultimate Team"-style overall + per-category
+  score shown on player cards (see "Player pages & ratings" below for the
+  full formula). Fetches each player's *last* season's game log fresh on
+  every run (not persisted to `PlayerGameLog`, just used as this
+  computation's baseline) on top of whatever "Sync full season game logs"
+  already stored for this season, so it makes one extra NHL request per
+  rostered player. Re-run roughly monthly to keep the season blend current;
+  it's a plain recompute-and-overwrite, safe to run any time.
 - **Full NHL player pool (free agents)**: pre-loads every player on all 32
   current NHL rosters (`lib/nhl.ts`'s `getTeamRoster`, one API call per
   team) as a `Player` row, ahead of actually needing them — so the full
@@ -270,7 +285,7 @@ action, and a browser tab left open from before a deploy is holding IDs
 that no longer exist on the (now-redeployed) server. Hard-refresh the page
 and try again before assuming it's a real bug.
 
-## Player pages & the 0–100 rating (`/players`)
+## Player pages & ratings (`/players`)
 
 The directory (`/players`) has a type-ahead search box
 (`components/players/PlayerSearchBar.tsx`) — filters the roster client-side
@@ -278,21 +293,67 @@ as you type (name or team), shows a dropdown of up to 8 matches, and
 jumps straight to a player's page on click or Enter. No API round trip;
 the roster's small enough to filter in the browser.
 
-Every rostered player has a card (`components/totw/PlayerCard.tsx`) and a
-detail page (`/players/[playerId]`) showing:
+Every rostered player gets an "Ultimate Team"-style season card
+(`components/players/SeasonCard.tsx`) — on the directory grid, and again as
+the hero of their detail page (`/players/[playerId]`), which also keeps the
+season totals and last-10-games history below it. Two rating systems feed
+the app, deliberately kept separate — a stable season-long card score and a
+volatile per-game one:
 
-- **Season totals** per scoring category, summed from synced
-  `PlayerGameLog` rows (`lib/playerRating.ts`'s `seasonTotalsForPlayer` —
-  rate stats like GAA/SV% are averaged across games, not summed).
-- **Last 10 games**, each with a short stat line and a **0–100 rating**.
+### Season card score
 
-The rating is a fixed-weight valuation model (`lib/playerRating.ts`) —
-originally a peer-relative z-score (a player's game judged against other
-rostered players at their position that week), replaced with a
-commissioner-provided formula since the peer-comparison approach degraded
-to a crude 40/50/60 guess whenever fewer than 3 peers had games that week.
-The new model needs no peer pool at all, so every game gets a real
-computed rating regardless of sample size:
+The card's big overall number and its per-category grid (0–100 for each of
+G/A/PPP/SHP/SOG/HIT/BLK/PIM for skaters, W/SV/GA/SO for goalies) come from
+`PlayerSeasonRating`, computed by **"Update season card scores"** on
+`/admin/nhl-sync` (re-run roughly monthly — a plain recompute-and-overwrite,
+safe any time). This is intentionally not a per-game number:
+
+- **Per-category 0–100 scores**: each category's blended per-game average
+  (below) is standardized against a hand-calibrated baseline/stdDev for
+  that specific category (`SKATER_CATEGORY_CALIBRATION` /
+  `GOALIE_CATEGORY_CALIBRATION` in `lib/playerRating.ts`) — separate
+  constants from the per-game valuation model further down, tuned tighter
+  on purpose so a genuine top performer and a replacement-level one land
+  visibly apart (HUT/FUT gold vs. bronze), not clustered within a few
+  points of 50.
+- **Overall**: a weighted average of those category scores, weighted
+  differently by position (`FORWARD_EMPHASIS` / `DEFENSE_EMPHASIS` /
+  `GOALIE_EMPHASIS`) — defensemen weight HIT/BLK/PIM more heavily than
+  forwards do; forwards weight G/A/PPP more heavily.
+- **Blended, not replaced**: starts as last season's rating at the
+  beginning of this season and shifts toward this season's actual
+  performance as the year goes on. `seasonBlendWeight` derives that blend
+  purely from today's date vs. October 1 of the season's start year
+  (ramping 0→1 over ~7 months) rather than from how many times the button's
+  been clicked, so re-running the update any time is always correct for
+  wherever the calendar actually is.
+- **HIT/BLK have no real last-season baseline**: getting those from a
+  player's entire prior season would mean a boxscore call per game per
+  rostered player — too expensive for an admin button — so the blend falls
+  back to that category's own baseline (a neutral ~50) instead of a
+  fabricated, punishing zero. Same fallback covers a true rookie with no
+  last-season data at all (`blendedSeasonScores`'s doc comment in
+  `lib/playerRating.ts` has the full reasoning).
+- **Card colors** match the player's real NHL team
+  (`Player.nhlTeamAbbrev`, hand-maintained in `lib/nhlTeamColors.ts`) —
+  populated by the same NHL sync matching that finds photos, falling back
+  to the site's own navy/gold when there's no team match yet.
+
+Until "Update season card scores" has run for a player, their card shows
+"–" in place of every score rather than a fabricated number.
+
+### Per-game rating (Last 10 games, Team of the Week)
+
+The detail page's **Last 10 games** list, and Team of the Week
+(`components/totw/PlayerCard.tsx` — a separate, deliberately-unchanged card
+for a specific week's standout performances), use a different,
+per-game/per-week rating: a fixed-weight valuation model
+(`lib/playerRating.ts`) — originally a peer-relative z-score (a player's
+game judged against other rostered players at their position that week),
+replaced with a commissioner-provided formula since the peer-comparison
+approach degraded to a crude 40/50/60 guess whenever fewer than 3 peers had
+games that week. This model needs no peer pool at all, so every game gets a
+real computed rating regardless of sample size:
 
 - **Skaters**: `3.0×G + 2.0×A + 1.0×PPP + 2.0×SHP + 0.4×SOG + 0.5×BLK + 0.3×HIT + 0.3×PIM`
 - **Goalies**: `4.0×W + 0.2×SV + 3.0×SO − 1.5×GA` (SV/GA are raw saves/goals-against
@@ -311,11 +372,14 @@ the week's date range (true game count, and the only source with real
 SV/GA for goalies), falling back to the week's `StatLine` totals with an
 assumed 3-game week when no per-game data exists yet (CSV-imported weeks,
 or before "Sync full season game logs" has run). A "72/100" means the same
-thing everywhere — one game, a week, Choker of the Week's bench-vs-started
-comparison — because it's all the same `ratingForValues` call underneath.
+thing everywhere in this per-game system — one game, a week, Choker of the
+Week's bench-vs-started comparison — because it's all the same
+`ratingForValues` call underneath. It means something different from the
+season card score above by design: one is "how was this game/week," the
+other is "how good is this player this year."
 
-Requires the "Sync full season game logs" admin action above to have run at
-least once; until then, player pages show "no synced games yet."
+Both need the "Sync full season game logs" admin action above to have run
+at least once; until then, player pages show "no synced games yet."
 
 ## Design system
 
@@ -433,7 +497,7 @@ The schema was deliberately built so this is an additive change, not a
 rewrite:
 
 - `Team` and `Player` already carry `externalSource` (`MANUAL | CSV_IMPORT |
-  YAHOO_SYNC`) and `externalId`.
+  YAHOO_SYNC | NHL_SYNC`) and `externalId`.
 - `StatLine` carries `source` the same way.
 - A Yahoo sync job would authenticate via OAuth2 against Yahoo's Fantasy
   Sports API, map Yahoo's league/team/player IDs into `externalId`, and
@@ -441,5 +505,42 @@ rewrite:
   today — just with `YAHOO_SYNC` as the source instead of `CSV_IMPORT`, and
   no commissioner CSV step in between.
 - The one thing to decide before building it: whether Yahoo becomes the
-  *only* data source going forward or runs alongside manual entry — the
-  schema supports either.
+  *only* data source going forward or runs alongside manual entry (NHL
+  sync, CSV, manual) — the schema supports either.
+
+**The OAuth2 client-side plumbing is scaffolded** (`lib/yahoo.ts`) so this
+is ready to wire up the moment there's a registered Yahoo app to point it
+at — but nothing in that file has ever made a real request. It's
+deliberately just the protocol-level pieces that don't need a live
+round-trip to get right:
+
+- `yahooAuthorizeUrl` / `exchangeYahooCode` / `refreshYahooTokens` — the
+  standard 3-legged OAuth2 authorization-code flow (RFC 6749) against
+  Yahoo's own `api.login.yahoo.com` endpoints.
+- `yahooFantasyFetch` — an authenticated raw-JSON GET against any Fantasy
+  API resource path, for once there's a token to call it with.
+- `isYahooConfigured()` — checks whether the three env vars below are set,
+  for a future admin page to gate a "Connect Yahoo" button on.
+
+**Deliberately not built yet**, because none of it can be gotten right
+(or tested) without real credentials:
+
+- An admin route pair to actually run the OAuth dance (`/authorize`
+  redirect → `/callback` exchanging the code) and something to persist the
+  resulting token pair — this league is commissioner-run, not per-user, so
+  that's a new small schema model once it's worth adding.
+- Any typed parser for what Yahoo's Fantasy API actually returns (roster
+  shape, player stats shape). Yahoo's endpoints return XML by default —
+  `format=json` gets JSON instead — but that JSON is a fairly literal
+  conversion of the XML tree with a well-known reputation for awkward,
+  deeply-nested, sometimes numeric-keyed arrays. Guessing at that blind
+  would likely just be wrong; the NHL client only has typed parsers because
+  this session had a live debug loop (paste real JSON back, fix the zod
+  schema) to confirm shapes against — `yahooFantasyFetch` is the same
+  starting point for Yahoo once real credentials make that loop possible.
+
+**To pick this up**: register an app at
+[developer.yahoo.com/apps](https://developer.yahoo.com/apps/) (Fantasy
+Sports read permission; set its callback URL to match
+`YAHOO_REDIRECT_URI`), then set `YAHOO_CLIENT_ID` / `YAHOO_CLIENT_SECRET` /
+`YAHOO_REDIRECT_URI` (see `.env.example`).

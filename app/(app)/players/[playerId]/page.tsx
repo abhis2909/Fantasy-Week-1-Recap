@@ -1,9 +1,8 @@
 import { notFound } from "next/navigation";
-import Image from "next/image";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { SectionCard } from "@/components/ui/SectionCard";
+import { SeasonCard } from "@/components/players/SeasonCard";
 import { prisma } from "@/lib/prisma";
-import { avatarForPlayer } from "@/lib/positionAvatar";
 import { formatStatValue } from "@/lib/formatStatValue";
 import { shortStatSummary } from "@/lib/statSummary";
 import { rateGamesForPlayer, seasonTotalsForPlayer } from "@/lib/playerRating";
@@ -15,7 +14,10 @@ export default async function PlayerDetailPage({
   const { playerId } = await params;
   const player = await prisma.player.findUnique({
     where: { id: playerId },
-    include: { rosterEntries: { where: { droppedAt: null }, include: { team: true } } },
+    include: {
+      rosterEntries: { where: { droppedAt: null }, include: { team: true } },
+      seasonRating: true,
+    },
   });
   if (!player) notFound();
 
@@ -44,15 +46,30 @@ export default async function PlayerDetailPage({
       />
 
       <SectionCard title="Season">
-        <div className="flex flex-col items-center gap-5 sm:flex-row sm:items-start">
-          <div className="relative h-40 w-40 shrink-0 overflow-hidden rounded-xl bg-white">
-            <Image src={avatarForPlayer(player)} alt="" fill className="object-cover" sizes="160px" />
+        <div className="flex flex-col items-center gap-6 sm:flex-row sm:items-start">
+          <div className="shrink-0">
+            <SeasonCard
+              name={player.fullName}
+              position={player.primaryPosition}
+              photoUrl={player.photoUrl}
+              nhlTeamAbbrev={player.nhlTeamAbbrev}
+              overall={player.seasonRating?.overall ?? null}
+              categoryScores={player.seasonRating?.categoryScores as Record<string, number> | null}
+              teamName={teamName}
+            />
           </div>
           <div className="flex-1">
-            <p className="mb-3 text-sm text-cream/70">
+            <p className="mb-1 text-sm text-cream/70">
               {gamesPlayed} game{gamesPlayed === 1 ? "" : "s"} synced
-              {avgRating !== null ? ` · average rating ${avgRating}/100` : ""}
+              {avgRating !== null ? ` · average per-game rating ${avgRating}/100` : ""}
             </p>
+            {!player.seasonRating && (
+              <p className="mb-3 text-sm text-cream/70">
+                No card score yet — run &quot;Update season card scores&quot; on the NHL Sync
+                admin page.
+              </p>
+            )}
+            <p className="mt-3 mb-2 text-xs tracking-wide text-cream/50 uppercase">Season totals</p>
             {categories.length === 0 || gamesPlayed === 0 ? (
               <p className="text-cream/70">
                 No synced games yet — run &quot;Sync full season game logs&quot; on the NHL
