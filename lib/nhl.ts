@@ -13,11 +13,14 @@ const landingUrl = (id: number) => `https://api-web.nhle.com/v1/player/${id}/lan
 
 const SearchMatchSchema = z
   .object({
-    playerId: z.number(),
+    // Confirmed live: this endpoint returns playerId as a numeric *string*
+    // (e.g. "8478402"), not a number — z.coerce handles either just in case
+    // that ever changes.
+    playerId: z.coerce.number(),
     name: z.string(),
     active: z.boolean().optional(),
     positionCode: z.string().optional(),
-    teamAbbrev: z.string().optional(),
+    teamAbbrev: z.string().nullable().optional(),
   })
   .passthrough();
 
@@ -42,7 +45,7 @@ export async function searchNhlPlayers(query: string): Promise<NhlSearchMatch[]>
     nhlPlayerId: r.playerId,
     name: r.name,
     active: r.active ?? true,
-    teamAbbrev: r.teamAbbrev,
+    teamAbbrev: r.teamAbbrev ?? undefined,
   }));
 }
 
@@ -71,19 +74,23 @@ function normalizeName(name: string): string {
 }
 
 /**
- * Best-effort exact-name match against NHL search results, preferring an
- * active player if multiple people share the name (this does happen — e.g.
- * more than one NHL player named "Sebastian Aho"). Returns null rather than
- * guessing when there's no exact (case-insensitive) name match, so
- * placeholder/synthetic names in the fixture data are correctly skipped
- * instead of matched to a random real player who happens to rank first in
- * NHL's own relevance search.
+ * Best-effort exact-name match against NHL search results, restricted to
+ * currently-active players — this league only cares about players who
+ * could actually be rostered this season, so a retired/minor-league player
+ * who happens to share an exact name with a fixture placeholder (e.g. a
+ * synthetic bench name) should never get matched over them just because
+ * there was no active player with that name. Also handles the case of
+ * multiple active players sharing a name (this does happen — e.g. more
+ * than one active NHL player named "Sebastian Aho") by taking the first.
+ * Returns null — never guesses — when there's no exact (case-insensitive,
+ * active-only) name match.
  */
 export async function findBestNhlMatch(playerName: string): Promise<NhlSearchMatch | null> {
   const results = await searchNhlPlayers(playerName);
-  const exact = results.filter((r) => normalizeName(r.name) === normalizeName(playerName));
-  if (exact.length === 0) return null;
-  return exact.find((r) => r.active) ?? exact[0];
+  const exact = results.filter(
+    (r) => r.active && normalizeName(r.name) === normalizeName(playerName)
+  );
+  return exact[0] ?? null;
 }
 
 // ---------------------------------------------------------------------------
