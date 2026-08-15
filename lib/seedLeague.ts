@@ -12,6 +12,7 @@ import type { PrismaClient, Position } from "@/lib/generated/prisma/client";
 import { computeAndSaveMatchup } from "@/lib/matchups";
 import { hashPassword } from "@/lib/password";
 import { TransactionDirection } from "@/lib/generated/prisma/client";
+import { depthNamesFor } from "@/lib/depthPlayerNames";
 import crypto from "node:crypto";
 
 // ---------------------------------------------------------------------------
@@ -78,15 +79,6 @@ const STAR_NAMES: Record<Exclude<Position, "D">, string[]> & { D: string[] } = {
     "Ilya Sorokin", "Juuse Saros", "Andrei Vasilevskiy", "Stuart Skinner",
   ],
 };
-
-const FILLER_FIRST = [
-  "Tyler", "Brayden", "Cole", "Logan", "Mason", "Carter", "Hunter", "Owen",
-  "Blake", "Riley", "Cameron", "Dawson",
-];
-const FILLER_LAST = [
-  "Sorensen", "Whitmore", "Bexley", "Carrow", "Danforth", "Kessler",
-  "Lindqvist", "Marsh", "Novak", "Osgood", "Pruitt", "Quaid",
-];
 
 const TEAM_NAMES = [
   "Puck Norris Approves",
@@ -168,16 +160,6 @@ export interface SeedResult {
 }
 
 export async function seedLeague(prisma: PrismaClient): Promise<SeedResult> {
-  const usedFillerNames = new Set<string>();
-  function nextFillerName(): string {
-    let name: string;
-    do {
-      name = `${pick(FILLER_FIRST)} ${pick(FILLER_LAST)}`;
-    } while (usedFillerNames.has(name));
-    usedFillerNames.add(name);
-    return name;
-  }
-
   console.log("Wiping existing data...");
   // Order matters: children before parents. onDelete: Cascade handles most of
   // this already, but deleting League cascades everything below it, so this
@@ -261,6 +243,20 @@ export async function seedLeague(prisma: PrismaClient): Promise<SeedResult> {
     return name;
   }
 
+  const depthPools: Record<Position, string[]> = {
+    C: shuffle(depthNamesFor("C")),
+    LW: shuffle(depthNamesFor("LW")),
+    RW: shuffle(depthNamesFor("RW")),
+    D: shuffle(depthNamesFor("D")),
+    G: shuffle(depthNamesFor("G")),
+  };
+  function nextDepthName(position: Position): string {
+    const pool = depthPools[position];
+    const name = pool.pop();
+    if (!name) throw new Error(`Ran out of depth names for ${position}`);
+    return name;
+  }
+
   const STARTER_SLOTS: Position[] = ["C", "LW", "RW", "D", "D", "G"];
 
   // Track a couple of players we deliberately want to reuse later for the
@@ -283,13 +279,13 @@ export async function seedLeague(prisma: PrismaClient): Promise<SeedResult> {
     const benchPositions: Position[] = [pick(["C", "LW", "RW", "D"]), pick(["C", "LW", "RW", "D"])];
     for (const benchPosition of benchPositions) {
       const player = await prisma.player.create({
-        data: { fullName: nextFillerName(), primaryPosition: benchPosition },
+        data: { fullName: nextDepthName(benchPosition), primaryPosition: benchPosition },
       });
       await prisma.rosterEntry.create({ data: { teamId: team.id, playerId: player.id } });
       rosterPlayers.push({ id: player.id, position: benchPosition, started: false, tier: "replacement" });
     }
     const backupGoalie = await prisma.player.create({
-      data: { fullName: nextFillerName(), primaryPosition: "G" },
+      data: { fullName: nextDepthName("G"), primaryPosition: "G" },
     });
     await prisma.rosterEntry.create({ data: { teamId: team.id, playerId: backupGoalie.id } });
     rosterPlayers.push({ id: backupGoalie.id, position: "G", started: false, tier: "replacement" });
@@ -368,7 +364,7 @@ export async function seedLeague(prisma: PrismaClient): Promise<SeedResult> {
   // 1. A waiver add that everyone will have an opinion about.
   const addTeam = teams[0];
   const addedPlayer = await prisma.player.create({
-    data: { fullName: nextFillerName(), primaryPosition: "RW", externalSource: "MANUAL" },
+    data: { fullName: nextDepthName("RW"), primaryPosition: "RW", externalSource: "MANUAL" },
   });
   await prisma.rosterEntry.create({ data: { teamId: addTeam.id, playerId: addedPlayer.id } });
   // Give the pickup an actual stat line, otherwise Pickup of the Week has

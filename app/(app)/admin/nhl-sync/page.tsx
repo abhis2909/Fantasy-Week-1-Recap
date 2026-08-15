@@ -17,6 +17,8 @@ import {
   mapWithConcurrency,
   NHL_GAME_TYPE_REGULAR_SEASON,
 } from "@/lib/nhl";
+import { depthNamesFor, isLegacyFictionalName } from "@/lib/depthPlayerNames";
+import type { Position } from "@/lib/generated/prisma/client";
 
 // Bulk-syncing a whole roster against an external API can run long —
 // each player needs 1-2 outbound requests. Raise the ceiling above
@@ -35,6 +37,10 @@ export default async function NhlSyncPage({
   const weeks = await prisma.week.findMany({ where: { seasonId: season.id }, orderBy: { number: "desc" } });
   const players = await prisma.player.findMany({ orderBy: { fullName: "asc" } });
   const matchedCount = players.filter((p) => p.externalId).length;
+  const fictionalCount = players.filter((p) => isLegacyFictionalName(p.fullName)).length;
+
+  const cleanupRenamed = Array.isArray(sp.cleanupRenamed) ? sp.cleanupRenamed[0] : sp.cleanupRenamed;
+  const cleanupFailed = (Array.isArray(sp.cleanupFailed) ? sp.cleanupFailed : sp.cleanupFailed ? [sp.cleanupFailed] : []) as string[];
 
   const photoMatched = Array.isArray(sp.photoMatched) ? sp.photoMatched[0] : sp.photoMatched;
   const photoSkipped = (Array.isArray(sp.photoSkipped) ? sp.photoSkipped : sp.photoSkipped ? [sp.photoSkipped] : []) as string[];
@@ -59,6 +65,67 @@ export default async function NhlSyncPage({
   const gamesErrored = (Array.isArray(sp.gamesErrored) ? sp.gamesErrored : sp.gamesErrored ? [sp.gamesErrored] : []) as string[];
 
   const gameLogCount = await prisma.playerGameLog.count();
+
+  /** Shuffles in place with plain Math.random — this is a one-time, non-
+   * reproducible production cleanup, not the seed fixture, so it doesn't
+   * need the seed's deterministic RNG. */
+  function shuffle<T>(arr: T[]): T[] {
+    const copy = [...arr];
+    for (let i = copy.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [copy[i], copy[j]] = [copy[j], copy[i]];
+    }
+    return copy;
+  }
+
+  async function cleanupFictionalNames() {
+    "use server";
+    const all = await prisma.player.findMany();
+    const usedNames = new Set(all.map((p) => p.fullName));
+    const targets = all.filter((p) => isLegacyFictionalName(p.fullName));
+
+    const pools: Record<Position, string[]> = {
+      C: shuffle(depthNamesFor("C")),
+      LW: shuffle(depthNamesFor("LW")),
+      RW: shuffle(depthNamesFor("RW")),
+      D: shuffle(depthNamesFor("D")),
+      G: shuffle(depthNamesFor("G")),
+    };
+
+    let renamed = 0;
+    const failed: string[] = [];
+    for (const player of targets) {
+      const pool = pools[player.primaryPosition];
+      let newName: string | undefined;
+      while (pool.length > 0) {
+        const candidate = pool.pop()!;
+        if (!usedNames.has(candidate)) {
+          newName = candidate;
+          break;
+        }
+      }
+      if (!newName) {
+        failed.push(player.fullName);
+        continue;
+      }
+      usedNames.add(newName);
+      // Only the name changes — same Player.id, so every RosterEntry,
+      // StatLine, Transaction, etc. still points at the same player and
+      // nothing else about the league's history moves. Clear photoUrl/
+      // externalId too so the next photo sync fetches this (now-real)
+      // person's actual headshot instead of leaving a stale placeholder.
+      await prisma.player.update({
+        where: { id: player.id },
+        data: { fullName: newName, photoUrl: null, externalId: null, externalSource: "MANUAL" },
+      });
+      renamed++;
+    }
+
+    revalidatePath("/admin/nhl-sync");
+    redirect(
+      `/admin/nhl-sync?${qs({ cleanupRenamed: renamed })}${failed.map((n) => `&cleanupFailed=${encodeURIComponent(n)}`).join("")}`
+    );
+  }
 
   async function syncPhotos() {
     "use server";
@@ -294,6 +361,37 @@ export default async function NhlSyncPage({
           page afterward if you need to mark anyone as benched, or to correct a value.
         </p>
       </SectionCard>
+
+      {fictionalCount > 0 && (
+        <SectionCard title="Clean up made-up player names">
+          <p className="mb-4 text-cream/80">
+            {fictionalCount} player{fictionalCount === 1 ? "" : "s"} on the roster still{" "}
+            {fictionalCount === 1 ? "has" : "have"} a made-up bench-filler name from the original
+            fixture data (not a real NHL player) — those can never match against the NHL API. This
+            renames them in place to real (non-star) active NHL players at the same position, so
+            they can be photo- and stat-synced like everyone else. It only changes the name — the
+            same player record keeps all its existing roster history, stats, and transactions.
+          </p>
+          {cleanupRenamed && (
+            <HighlightBox title="Cleanup complete">
+              <p>Renamed {cleanupRenamed} player{cleanupRenamed === "1" ? "" : "s"}.</p>
+              {cleanupFailed.length > 0 && (
+                <p className="mt-2 text-danger">
+                  Ran out of unique real names for: {cleanupFailed.join(", ")}
+                </p>
+              )}
+            </HighlightBox>
+          )}
+          <form action={cleanupFictionalNames}>
+            <button
+              type="submit"
+              className="mt-2 rounded-lg bg-gold px-4 py-2 text-sm font-semibold text-navy-deep transition hover:bg-gold-bright"
+            >
+              Rename made-up players to real ones
+            </button>
+          </form>
+        </SectionCard>
+      )}
 
       <SectionCard title="Player photos & NHL matching">
         <p className="mb-4 text-cream/80">

@@ -151,14 +151,25 @@ Everything below lives under `/admin` (commissioner-only — gated on
 
 Uses NHL.com's own unofficial, undocumented API (the same one its search bar
 and stats pages run on) — there's no official public NHL developer program
-with a key/ToS. Two independent actions:
+with a key/ToS.
 
+- **Clean up made-up player names** (only shown if any exist): the original
+  seed fixture padded out bench depth with invented names
+  (`lib/seedLeague.ts`'s old filler generator — "Blake Whitmore" and the
+  like), which can never match a real NHL player. This renames those rows
+  in place to real (non-star) active NHL players at the same position —
+  same `Player.id`, so all existing roster history/stats/transactions stay
+  attached — so the whole roster becomes sync-able. Fresh seeds no longer
+  generate fictional names in the first place (`lib/depthPlayerNames.ts`).
 - **Photos & matching**: for every `Player`, searches NHL.com by exact
-  (case-insensitive) name and, on a match, saves their real headshot and NHL
-  player ID (`Player.photoUrl` / `externalId`). Players with no exact match
-  (typos, retired players, the seed fixture's synthetic bench names) are
-  left on the generic per-position illustration and reported as skipped —
-  nothing is guessed.
+  (case-insensitive) name among currently-active players only, and on a
+  match, saves their real headshot and NHL player ID (`Player.photoUrl` /
+  `externalId`). Players with no exact active-player match (typos, remaining
+  fictional fixture names, retired players) are left on the generic
+  per-position illustration and reported as skipped — nothing is guessed.
+  Requires `next.config.ts`'s `images.remotePatterns` to allow
+  `*.nhle.com` (already configured) — without it, `next/image` silently
+  refuses to render the real headshot URLs.
 - **Weekly stat sync**: for a chosen week, fetches each rostered player's
   real NHL game log, sums the games falling inside that week's date range
   into your league's scoring categories, and writes `StatLine` rows
@@ -174,16 +185,20 @@ with a key/ToS. Two independent actions:
   synced. This is what powers the individual player pages below; re-run it
   periodically (it's a full upsert, safe to repeat) to pick up new games.
 
-**Caveat that matters**: the search/landing endpoint shapes were confirmed
-against a community API reference
-([Zmalski/NHL-API-Reference](https://github.com/Zmalski/NHL-API-Reference)),
-but the per-game **stat field names** used by weekly sync (`goals`,
-`assists`, `pim`, `powerPlayPoints`, etc.) are a best-effort guess — this
-sandbox couldn't reach `api-web.nhle.com` to verify a live response before
-shipping this. If synced numbers look wrong (all zero is the likely
-symptom), use the **"Debug: preview a raw NHL response"** box on that page
-to see a real player's actual JSON, and the field-name list in
-`lib/nhl.ts`'s `aggregateSkaterStats`/`aggregateGoalieStats` is the one
+**Search endpoint shape is now verified against a live response**: it
+returns `playerId` as a numeric *string* (e.g. `"8478402"`), not a number —
+`lib/nhl.ts` coerces it. (This sandbox has no network access to
+`nhle.com`, so it took a round-trip through the debug tool below to catch —
+worth remembering if the API shape drifts again later.)
+
+**Caveat that still applies**: the per-game **stat field names** used by
+weekly sync and full-season game-log sync (`goals`, `assists`, `pim`,
+`powerPlayPoints`, etc.) are still a best-effort guess, unverified against a
+live game-log response. If synced numbers look wrong (all zero is the
+likely symptom), use the **"Debug: preview a raw NHL search response"** or
+**"...game-log response"** boxes on that page to see the real JSON, and the
+field-name list in `lib/nhl.ts`'s `aggregateSkaterStats`/
+`aggregateGoalieStats`/`mapSkaterGameEntry`/`mapGoalieGameEntry` is the one
 place to fix if the real names differ.
 
 ## Player pages & the 0–100 rating (`/players`)
