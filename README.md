@@ -180,10 +180,19 @@ Built for Vercel + a hosted Postgres provider (Neon, Supabase, etc.):
 3. Migrations run automatically on every deploy — the `vercel-build` script
    runs `prisma migrate deploy` before `next build`, so there's no separate
    manual migration step against the production database.
-4. Seed the production database once (from your own machine, with
-   `DATABASE_URL` pointed at prod): `COMMISSIONER_PASSWORD=... npx prisma db
-   seed`. Or skip the fixture entirely and use the (upcoming) admin "add
-   manager" flow to create real accounts from scratch — see follow-ups.
+4. Seed the production database once. Two ways to do this:
+   - **From a local terminal**, with `DATABASE_URL` pointed at prod:
+     `COMMISSIONER_PASSWORD=... npx prisma db seed`.
+   - **From anywhere, no terminal needed**: set `SETUP_TOKEN` (any random
+     string) and `COMMISSIONER_PASSWORD` in Vercel's env vars, redeploy, then
+     send one request:
+     ```bash
+     curl -X POST https://your-app.vercel.app/api/setup/bootstrap \
+       -H "x-setup-token: <your SETUP_TOKEN>"
+     ```
+     This is `app/api/setup/bootstrap/route.ts` — it refuses to run if the
+     database already has any users, so it's safe to leave in place; it can
+     only ever seed an empty database once.
 5. If you want the recap draft to auto-generate weekly, wire a Vercel Cron
    job to call a small authenticated route that runs
    `generateRecapDraft(weekId)` — this repo doesn't include that route yet
