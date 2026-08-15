@@ -24,9 +24,9 @@ export default async function RecapsListPage() {
               <Link
                 key={a.id}
                 href={`/recaps/${a.weekId}`}
-                className="rounded-xl border-r-4 border-l-4 border-blue bg-cream-soft px-5 py-4 shadow-sm transition hover:shadow-md"
+                className="rounded-xl border-l-4 border-gold bg-cream-soft px-5 py-4 shadow-sm transition hover:shadow-md"
               >
-                <h3 className="font-heading text-lg text-red">{a.title}</h3>
+                <h3 className="font-heading text-lg text-navy-deep">{a.title}</h3>
                 <p className="text-xs text-neutral-500">
                   Week {a.week.number} &middot; published{" "}
                   {a.publishedAt?.toLocaleDateString()}

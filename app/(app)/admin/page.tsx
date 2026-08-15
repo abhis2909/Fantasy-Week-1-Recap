@@ -40,9 +40,9 @@ export default function AdminOverviewPage() {
             <Link
               key={c.href}
               href={c.href}
-              className="rounded-xl border-r-4 border-l-4 border-blue bg-cream-soft px-5 py-4 shadow-sm transition hover:shadow-md"
+              className="rounded-xl border-l-4 border-gold bg-cream-soft px-5 py-4 shadow-sm transition hover:shadow-md"
             >
-              <h3 className="font-heading text-lg text-red">{c.title}</h3>
+              <h3 className="font-heading text-lg text-navy-deep">{c.title}</h3>
               <p className="mt-1 text-sm text-neutral-700">{c.body}</p>
             </Link>
           ))}

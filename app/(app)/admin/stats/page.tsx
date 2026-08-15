@@ -100,12 +100,12 @@ export default async function AdminStatsPage({
               name="csv"
               accept=".csv,text/csv"
               required
-              className="w-fit rounded-lg border border-white/20 bg-white/10 px-3 py-2 text-white file:mr-3 file:rounded file:border-0 file:bg-red file:px-3 file:py-1 file:text-white"
+              className="w-fit rounded-lg border border-white/20 bg-white/10 px-3 py-2 text-white file:mr-3 file:rounded file:border-0 file:bg-gold file:px-3 file:py-1 file:text-navy-deep"
             />
           </label>
           <button
             type="submit"
-            className="w-fit rounded-lg bg-red px-4 py-2 text-sm font-semibold text-white transition hover:opacity-90"
+            className="w-fit rounded-lg bg-gold px-4 py-2 text-sm font-semibold text-navy-deep transition hover:bg-gold-bright"
           >
             Import
           </button>

@@ -21,9 +21,9 @@ export default async function AdminRecapsPage() {
             <Link
               key={w.id}
               href={`/admin/recaps/${w.id}/edit`}
-              className="flex items-center justify-between rounded-xl border-r-4 border-l-4 border-blue bg-cream-soft px-5 py-4 shadow-sm transition hover:shadow-md"
+              className="flex items-center justify-between rounded-xl border-l-4 border-gold bg-cream-soft px-5 py-4 shadow-sm transition hover:shadow-md"
             >
-              <span className="font-heading text-lg text-red">Week {w.number}</span>
+              <span className="font-heading text-lg text-navy-deep">Week {w.number}</span>
               <span className="text-sm text-neutral-600">
                 {!w.recapArticle
                   ? "No draft yet"

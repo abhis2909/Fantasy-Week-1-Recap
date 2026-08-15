@@ -18,10 +18,10 @@ export default async function AdminLayout({ children }: { children: React.ReactN
 
   return (
     <div>
-      <div className="border-b border-neutral-200 bg-white px-4 py-3">
+      <div className="border-b border-navy/10 bg-cream-soft px-4 py-3">
         <nav className="mx-auto flex max-w-5xl flex-wrap gap-x-4 gap-y-1 text-sm font-medium text-neutral-600">
           {ADMIN_LINKS.map((link) => (
-            <Link key={link.href} href={link.href} className="hover:text-red">
+            <Link key={link.href} href={link.href} className="hover:text-navy-deep hover:underline">
               {link.label}
             </Link>
           ))}

@@ -181,13 +181,22 @@ place to fix if the real names differ.
 
 ## Design system
 
-The navy/cream/red/blue theme, Oswald/Inter fonts, and card/highlight-box
-visual language are pulled from an earlier static mockup
-(`fantasywebsite/index.html`, preserved in git history at commit `1f3a475`)
-and rebuilt as Tailwind v4 theme tokens (`app/globals.css`) plus reusable
-components in `components/ui/` and `components/totw/`. The per-position
-illustrated player avatars in `public/images/positions/` are from that same
-mockup — generic placeholders, not real player likenesses.
+"Royal Hockey": deep navy + gold, condensed bold uppercase display type
+(Oswald), a crown/shield crest mark (`components/ui/Crest.tsx`, inline SVG),
+and a single strong accent color rather than a multi-color palette —
+rebuilt from a reference concept video the commissioner supplied (dark
+cinematic hero, gold CTA buttons, clean white content cards). Theme tokens
+live in `app/globals.css`; reusable components in `components/ui/` and
+`components/totw/`. `--color-danger` is a separate, deliberately-not-gold
+token reserved for genuine error states (failed imports, form errors) so
+they never blend into the brand accent.
+
+An earlier iteration used a cream/red/blue palette pulled from a static
+mockup (`fantasywebsite/index.html`, preserved in git history at commit
+`1f3a475`) — superseded by the above, but the per-position illustrated
+player avatars in `public/images/positions/` are still from that mockup
+(generic placeholders, not real player likenesses) and the arena photo
+backdrop (`public/images/arena-hero.jpg`) is reused on the sign-in page.
 
 ## Algorithms worth knowing about
 

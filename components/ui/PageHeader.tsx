@@ -6,11 +6,11 @@ export function PageHeader({
   subtitle?: string;
 }) {
   return (
-    <header className="border-t-[6px] border-b-[6px] border-t-red border-b-blue bg-white px-5 py-8 text-center text-navy-ink">
-      <h1 className="font-heading text-3xl tracking-wide text-navy-deep sm:text-4xl">
+    <header className="border-b-2 border-gold bg-navy-deep px-5 py-10 text-center">
+      <h1 className="font-heading text-3xl tracking-wide text-gold uppercase sm:text-4xl">
         {title}
       </h1>
-      {subtitle && <p className="mt-2 text-neutral-600">{subtitle}</p>}
+      {subtitle && <p className="mt-2 text-cream/70">{subtitle}</p>}
     </header>
   );
 }

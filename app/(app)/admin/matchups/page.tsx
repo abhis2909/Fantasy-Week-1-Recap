@@ -83,7 +83,7 @@ export default async function AdminMatchupsPage({
             <a
               key={w.id}
               href={`/admin/matchups?week=${w.id}`}
-              className={`rounded-lg px-3 py-1.5 text-sm ${w.id === week?.id ? "bg-red text-white" : "bg-white/10 text-cream/80 hover:bg-white/20"}`}
+              className={`rounded-lg px-3 py-1.5 text-sm ${w.id === week?.id ? "bg-gold text-navy-deep" : "bg-white/10 text-cream/80 hover:bg-white/20"}`}
             >
               Week {w.number}
             </a>
@@ -91,7 +91,7 @@ export default async function AdminMatchupsPage({
           <form action={startNextWeek}>
             <button
               type="submit"
-              className="rounded-lg bg-blue px-3 py-1.5 text-sm font-semibold text-white transition hover:opacity-90"
+              className="rounded-lg border-2 border-gold px-3 py-1.5 text-sm font-semibold text-gold transition hover:bg-gold/10"
             >
               + Start next week
             </button>
@@ -143,7 +143,7 @@ export default async function AdminMatchupsPage({
             ))}
             <button
               type="submit"
-              className="w-fit rounded-lg bg-red px-4 py-2 text-sm font-semibold text-white transition hover:opacity-90"
+              className="w-fit rounded-lg bg-gold px-4 py-2 text-sm font-semibold text-navy-deep transition hover:bg-gold-bright"
             >
               Compute matchup results
             </button>

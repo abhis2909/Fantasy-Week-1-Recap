@@ -4,6 +4,7 @@ import { AuthError } from "next-auth";
 import { auth, signIn } from "@/lib/auth";
 import { SectionCard } from "@/components/ui/SectionCard";
 import { HighlightBox } from "@/components/ui/HighlightBox";
+import { Crest } from "@/components/ui/Crest";
 
 async function submitLogin(formData: FormData) {
   "use server";
@@ -34,7 +35,7 @@ export default async function LoginPage({
 
   return (
     <div className="flex min-h-screen flex-col">
-      <div className="relative flex flex-col items-center justify-center overflow-hidden border-b-[6px] border-b-blue px-5 py-16 text-center">
+      <div className="relative flex flex-col items-center justify-center overflow-hidden border-b-2 border-b-gold px-5 py-16 text-center">
         <Image
           src="/images/arena-hero.jpg"
           alt=""
@@ -42,10 +43,13 @@ export default async function LoginPage({
           priority
           className="object-cover"
         />
-        <div className="absolute inset-0 bg-navy-ink/70" />
+        <div className="absolute inset-0 bg-navy-deep/80" />
         <div className="relative">
-          <h1 className="font-heading text-4xl tracking-wide text-white sm:text-5xl">
-            🏒 Slapshot City Fantasy Hockey League
+          <div className="mb-3 flex justify-center">
+            <Crest className="h-14 w-14" />
+          </div>
+          <h1 className="font-heading text-4xl tracking-wide text-gold uppercase sm:text-5xl">
+            Slapshot City Fantasy Hockey League
           </h1>
           <p className="mt-3 text-cream/90">
             Standings, stats, and a newsletter that will not be kind to your
@@ -73,7 +77,7 @@ export default async function LoginPage({
                 autoComplete="username"
                 required
                 placeholder="you@example.com"
-                className="rounded-lg border border-white/20 bg-white/10 px-4 py-2.5 text-white placeholder-cream/50 focus:border-red focus:outline-none"
+                className="rounded-lg border border-white/20 bg-white/10 px-4 py-2.5 text-white placeholder-cream/50 focus:border-gold focus:outline-none"
               />
             </label>
             <label className="flex flex-col gap-1 text-sm text-white">
@@ -83,12 +87,12 @@ export default async function LoginPage({
                 name="password"
                 autoComplete="current-password"
                 required
-                className="rounded-lg border border-white/20 bg-white/10 px-4 py-2.5 text-white focus:border-red focus:outline-none"
+                className="rounded-lg border border-white/20 bg-white/10 px-4 py-2.5 text-white focus:border-gold focus:outline-none"
               />
             </label>
             <button
               type="submit"
-              className="mt-2 rounded-lg bg-red px-5 py-2.5 font-semibold text-white transition hover:opacity-90"
+              className="mt-2 rounded-lg bg-gold px-5 py-2.5 font-semibold text-navy-deep transition hover:bg-gold-bright"
             >
               Sign in
             </button>

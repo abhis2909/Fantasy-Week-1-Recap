@@ -21,7 +21,7 @@ export function TransactionCard({ tx }: { tx: TransactionWithRelations }) {
   return (
     <Link
       href={`/transactions/${tx.id}`}
-      className="block rounded-xl border-r-4 border-l-4 border-blue bg-cream-soft px-5 py-4 shadow-sm transition hover:shadow-md"
+      className="block rounded-xl border-l-4 border-gold bg-cream-soft px-5 py-4 shadow-sm transition hover:shadow-md"
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
@@ -35,7 +35,7 @@ export function TransactionCard({ tx }: { tx: TransactionWithRelations }) {
         </div>
         <div className="text-right">
           {tx.ratingCount > 0 ? (
-            <span className="font-heading text-lg text-red">
+            <span className="font-heading text-lg text-navy-deep">
               {tx.avgRating}/10{" "}
               <span className="text-xs font-normal text-neutral-500">
                 ({tx.ratingCount} rating{tx.ratingCount === 1 ? "" : "s"})

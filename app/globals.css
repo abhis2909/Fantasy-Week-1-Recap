@@ -1,21 +1,26 @@
 @import "tailwindcss";
 
 /*
- * Design system pulled from the original fantasywebsite/index.html mockup
- * (see git history commit 1f3a475). This app commits to one branded
- * "sports newsletter" look rather than adapting to system dark mode —
- * same reasoning as the mockup: it's a themed publication, not a generic
- * app surface.
+ * "Royal Hockey" design system: deep navy + gold, condensed bold display
+ * type, single strong accent color. Rebuilt from a reference concept video
+ * the commissioner supplied (dark cinematic hero, gold CTA buttons, crest/
+ * crown branding, clean white content sections) — see components/ui/Crest.tsx
+ * for the logo mark. Commits to one branded look rather than adapting to
+ * system dark mode, same as before: it's a themed publication, not a
+ * generic app surface.
  */
 :root {
-  --color-cream: #f8f6f1;
-  --color-cream-soft: #f8fbff;
-  --color-navy: #012e5f;
-  --color-navy-deep: #002b5b;
-  --color-navy-ink: #0d1b2a;
-  --color-red: #c62828;
-  --color-blue: #004aad;
+  --color-cream: #f7f6f2;
+  --color-cream-soft: #fdfcfa;
+  --color-navy: #0a1a2f;
+  --color-navy-deep: #060f1c;
+  --color-navy-ink: #0a1420;
+  --color-gold: #d4af37;
+  --color-gold-bright: #f2c94c;
   --color-ink: #1c1c1c;
+  /* Not a brand accent — reserved for genuine error/danger states (failed
+     imports, form errors) so those never get lost against gold highlights. */
+  --color-danger: #c0392b;
 }
 
 @theme inline {
@@ -24,9 +29,10 @@
   --color-navy: var(--color-navy);
   --color-navy-deep: var(--color-navy-deep);
   --color-navy-ink: var(--color-navy-ink);
-  --color-red: var(--color-red);
-  --color-blue: var(--color-blue);
+  --color-gold: var(--color-gold);
+  --color-gold-bright: var(--color-gold-bright);
   --color-ink: var(--color-ink);
+  --color-danger: var(--color-danger);
   --font-heading: var(--font-oswald);
   --font-body: var(--font-inter);
 }

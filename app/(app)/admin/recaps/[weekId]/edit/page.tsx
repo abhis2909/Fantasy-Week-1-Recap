@@ -70,7 +70,7 @@ export default async function EditRecapPage({
           <form action={generateDraft}>
             <button
               type="submit"
-              className="rounded-lg bg-red px-4 py-2 text-sm font-semibold text-white transition hover:opacity-90"
+              className="rounded-lg bg-gold px-4 py-2 text-sm font-semibold text-navy-deep transition hover:bg-gold-bright"
             >
               {article ? "Regenerate draft" : "Generate draft"}
             </button>
@@ -79,7 +79,7 @@ export default async function EditRecapPage({
             <form action={togglePublish}>
               <button
                 type="submit"
-                className="rounded-lg bg-blue px-4 py-2 text-sm font-semibold text-white transition hover:opacity-90"
+                className="rounded-lg border-2 border-gold px-4 py-2 text-sm font-semibold text-gold transition hover:bg-gold/10"
               >
                 {article.isPublished ? "Unpublish" : "Publish"}
               </button>
@@ -108,19 +108,19 @@ export default async function EditRecapPage({
                 <input
                   name={`title-${s.id}`}
                   defaultValue={s.title}
-                  className="mb-2 w-full rounded-lg border border-white/20 bg-white/10 px-3 py-2 font-heading text-lg text-white focus:border-red focus:outline-none"
+                  className="mb-2 w-full rounded-lg border border-white/20 bg-white/10 px-3 py-2 font-heading text-lg text-white focus:border-gold focus:outline-none"
                 />
                 <textarea
                   name={`body-${s.id}`}
                   defaultValue={s.body}
                   rows={4}
-                  className="w-full rounded-lg border border-white/20 bg-white/10 px-3 py-2 text-sm text-white focus:border-red focus:outline-none"
+                  className="w-full rounded-lg border border-white/20 bg-white/10 px-3 py-2 text-sm text-white focus:border-gold focus:outline-none"
                 />
               </div>
             ))}
             <button
               type="submit"
-              className="w-fit rounded-lg bg-red px-4 py-2 text-sm font-semibold text-white transition hover:opacity-90"
+              className="w-fit rounded-lg bg-gold px-4 py-2 text-sm font-semibold text-navy-deep transition hover:bg-gold-bright"
             >
               Save edits
             </button>

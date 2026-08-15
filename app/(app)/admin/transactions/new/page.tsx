@@ -188,7 +188,7 @@ export default async function NewTransactionPage({
             </div>
           </fieldset>
 
-          <button type="submit" className="w-fit rounded-lg bg-red px-5 py-2.5 font-semibold text-white transition hover:opacity-90">
+          <button type="submit" className="w-fit rounded-lg bg-gold px-5 py-2.5 font-semibold text-navy-deep transition hover:bg-gold-bright">
             Log transaction
           </button>
         </form>

@@ -31,11 +31,11 @@ export function RatingForm({
         rows={2}
         defaultValue={existingComment ?? ""}
         placeholder="Optional roast (or praise, if you must)"
-        className="rounded-lg border border-white/20 bg-white/10 px-3 py-2 text-sm text-white placeholder-cream/50 focus:border-red focus:outline-none"
+        className="rounded-lg border border-white/20 bg-white/10 px-3 py-2 text-sm text-white placeholder-cream/50 focus:border-gold focus:outline-none"
       />
       <button
         type="submit"
-        className="w-fit rounded-lg bg-red px-4 py-2 text-sm font-semibold text-white transition hover:opacity-90"
+        className="w-fit rounded-lg bg-gold px-4 py-2 text-sm font-semibold text-navy-deep transition hover:bg-gold-bright"
       >
         {existingScore ? "Update rating" : "Submit rating"}
       </button>

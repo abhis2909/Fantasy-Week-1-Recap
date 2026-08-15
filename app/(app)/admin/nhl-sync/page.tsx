@@ -204,13 +204,13 @@ export default async function NhlSyncPage({
           <HighlightBox title="Sync complete">
             <p>Matched {photoMatched} player{photoMatched === "1" ? "" : "s"}.</p>
             {photoSkipped.length > 0 && <p className="mt-2">No exact match: {photoSkipped.join(", ")}</p>}
-            {photoErrored.length > 0 && <p className="mt-2 text-red">Errors: {photoErrored.join(", ")}</p>}
+            {photoErrored.length > 0 && <p className="mt-2 text-danger">Errors: {photoErrored.join(", ")}</p>}
           </HighlightBox>
         )}
         <form action={syncPhotos}>
           <button
             type="submit"
-            className="mt-2 rounded-lg bg-red px-4 py-2 text-sm font-semibold text-white transition hover:opacity-90"
+            className="mt-2 rounded-lg bg-gold px-4 py-2 text-sm font-semibold text-navy-deep transition hover:bg-gold-bright"
           >
             Sync photos &amp; match all players
           </button>
@@ -222,7 +222,7 @@ export default async function NhlSyncPage({
           <HighlightBox title="Sync complete">
             <p>Filled stats for {statMatched} player{statMatched === "1" ? "" : "s"}.</p>
             {statSkipped.length > 0 && <p className="mt-2">Skipped: {statSkipped.join(", ")}</p>}
-            {statErrored.length > 0 && <p className="mt-2 text-red">Errors: {statErrored.join(", ")}</p>}
+            {statErrored.length > 0 && <p className="mt-2 text-danger">Errors: {statErrored.join(", ")}</p>}
           </HighlightBox>
         )}
         <form action={syncStats} className="mt-2 flex flex-wrap items-center gap-3">
@@ -238,7 +238,7 @@ export default async function NhlSyncPage({
           </select>
           <button
             type="submit"
-            className="rounded-lg bg-red px-4 py-2 text-sm font-semibold text-white transition hover:opacity-90"
+            className="rounded-lg bg-gold px-4 py-2 text-sm font-semibold text-navy-deep transition hover:bg-gold-bright"
           >
             Pull stats from NHL for this week
           </button>
@@ -260,7 +260,7 @@ export default async function NhlSyncPage({
           />
           <button
             type="submit"
-            className="rounded-lg bg-blue px-4 py-2 text-sm font-semibold text-white transition hover:opacity-90"
+            className="rounded-lg border-2 border-gold px-4 py-2 text-sm font-semibold text-gold transition hover:bg-gold/10"
           >
             Preview raw response
           </button>
