@@ -39,7 +39,13 @@ export default async function PlayersDirectoryPage() {
       />
       <SectionCard title="Roster">
         <PlayerSearchBar players={searchEntries} />
-        <div className="grid grid-cols-2 place-items-center gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+        {/* No place-items-center here on purpose — grid items default to
+            stretch, so every card in a row gets the same column width
+            (SeasonCard centers itself within it via mx-auto). Centering the
+            grid items directly instead would size each one to its own
+            content (name length), producing visibly different card widths
+            across the same row. */}
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
           {rosterEntries.map((entry, i) => (
             <Reveal key={entry.player.id} delayMs={(i % 12) * 50}>
               <SeasonCard

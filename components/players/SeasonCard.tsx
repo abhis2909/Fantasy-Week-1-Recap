@@ -69,7 +69,7 @@ export function SeasonCard({
 
   const content = (
     <div
-      className="relative flex w-full max-w-[240px] flex-col overflow-hidden rounded-2xl border-2 shadow-lg shadow-black/30 transition-transform duration-200 ease-out hover:-translate-y-1.5 hover:shadow-xl"
+      className="relative mx-auto flex w-full max-w-[240px] flex-col overflow-hidden rounded-2xl border-2 shadow-lg shadow-black/30 transition-transform duration-200 ease-out hover:-translate-y-1.5 hover:shadow-xl"
       style={{
         borderColor: colors.secondary,
         background: `linear-gradient(160deg, ${shade(colors.primary, 0.12)} 0%, ${colors.primary} 45%, ${shade(colors.primary, -0.35)} 100%)`,
@@ -132,7 +132,13 @@ export function SeasonCard({
       </div>
 
       {/* Per-category score grid */}
-      <div className="mx-3 my-3 grid grid-cols-4 gap-1.5 rounded-lg bg-black/25 p-2 backdrop-blur-sm">
+      {/* Always 2 rows regardless of position — 4 wide for skaters' 8
+          categories, 2 wide for goalies' 4 — so a skater card and a goalie
+          card end up the same height and line up cleanly in a grid. */}
+      <div
+        className={`mx-3 my-3 grid gap-1.5 rounded-lg bg-black/25 p-2 backdrop-blur-sm ${codes.length > 4 ? "grid-cols-4" : "grid-cols-2"}`}
+      >
+
         {codes.map((code) => (
           <div
             key={code}
