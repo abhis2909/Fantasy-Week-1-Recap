@@ -176,6 +176,22 @@ with a key/ToS.
   the button itself errors out (see the stale-action-ID note below). Visit
   it directly while signed in as commissioner; safe to reload/re-run any
   time, it's a no-op once nothing's left to rename.
+
+  A candidate real name can already exist as its own `Player` row — most
+  often because "Import full NHL player pool" already created it as a
+  free agent. `renameLegacyFictionalPlayers` handles that by merging: it
+  re-points every `RosterEntry`/`StatLine`/`WeeklyRosterSlot`/
+  `TransactionPlayer`/`TeamOfWeekSelection`/`PlayerGameLog` row from the
+  fictional player's id onto the existing (already NHL-matched) real
+  player's id, then deletes the now-empty fictional row — rather than
+  reporting "ran out of names" for a name that was actually available,
+  or (worse) creating two different `Player` rows with the same display
+  name. Only an *actively rostered* same-name collision still causes a
+  skip. Verified locally against the exact failure a live run hit — a
+  DB seeded with legacy names plus a partially-populated free-agent pool
+  (mirroring an `Import full NHL player pool` run having already added
+  some of the same real players) — confirming zero data loss and no
+  duplicate names either way (merge or plain rename).
 - **Photos & matching**: for every `Player`, searches NHL.com by exact
   (case-insensitive) name among currently-active players only, and on a
   match, saves their real headshot and NHL player ID (`Player.photoUrl` /
