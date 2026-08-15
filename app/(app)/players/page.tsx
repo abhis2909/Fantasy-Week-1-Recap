@@ -3,6 +3,7 @@ import Image from "next/image";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { SectionCard } from "@/components/ui/SectionCard";
 import { Reveal } from "@/components/ui/Reveal";
+import { PlayerSearchBar } from "@/components/players/PlayerSearchBar";
 import { prisma } from "@/lib/prisma";
 import { avatarForPlayer } from "@/lib/positionAvatar";
 import { getCurrentSeason } from "@/lib/currentSeason";
@@ -15,6 +16,14 @@ export default async function PlayersDirectoryPage() {
     orderBy: [{ team: { name: "asc" } }, { player: { fullName: "asc" } }],
   });
 
+  const searchEntries = rosterEntries.map((entry) => ({
+    id: entry.player.id,
+    fullName: entry.player.fullName,
+    primaryPosition: entry.player.primaryPosition,
+    teamName: entry.team.name,
+    avatarUrl: avatarForPlayer(entry.player),
+  }));
+
   return (
     <>
       <PageHeader
@@ -22,6 +31,7 @@ export default async function PlayersDirectoryPage() {
         subtitle="Every rostered player — season stats, last 10 games, and a 0-100 rating for each."
       />
       <SectionCard title="Roster">
+        <PlayerSearchBar players={searchEntries} />
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4">
           {rosterEntries.map((entry, i) => (
             <Reveal key={entry.player.id} delayMs={(i % 12) * 50}>

@@ -205,7 +205,9 @@ export default async function NhlSyncPage({
           return;
         }
 
-        const categories = await prisma.scoringCategory.findMany({ where: { leagueId: season.leagueId } });
+        const categories = await prisma.scoringCategory.findMany({
+          where: { leagueId: season.leagueId, enabled: true },
+        });
         const categoryByCode = new Map(categories.map((c) => [c.code, c]));
 
         await prisma.weeklyRosterSlot.upsert({

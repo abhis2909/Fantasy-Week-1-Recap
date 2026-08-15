@@ -21,7 +21,7 @@ export default async function PlayerDetailPage({
 
   const season = await getCurrentSeason();
   const categories = await prisma.scoringCategory.findMany({
-    where: { leagueId: season.leagueId, appliesTo: { has: player.primaryPosition } },
+    where: { leagueId: season.leagueId, appliesTo: { has: player.primaryPosition }, enabled: true },
     orderBy: { sortOrder: "asc" },
   });
 

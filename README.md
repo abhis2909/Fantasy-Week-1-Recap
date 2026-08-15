@@ -96,7 +96,13 @@ change their own password — see the follow-ups below.
   (e.g. `{"C":1,"LW":1,"RW":1,"D":2,"G":1}`) and `ScoringCategory` rows
   (code, label, which positions it applies to, whether higher is better) are
   both data, not hardcoded — the app doesn't assume any specific roster
-  shape or category set beyond the five hockey positions.
+  shape or category set beyond the five hockey positions. Live category
+  set: **Goals, Assists, Power Play Points, Shorthanded Points, Shots on
+  Goal, Penalty Minutes, Hits, Blocks** for skaters; **Wins, GAA, SV%,
+  Shutouts** for goalies. `ScoringCategory.enabled` lets a category be
+  retired without deleting it (and its history) — see "Update scoring
+  categories" on `/admin/stats` for how the league's original Plus/Minus
+  category was retired in favor of Shorthanded Points.
 - **Team / Player / RosterEntry** track season-long roster ownership.
   **WeeklyRosterSlot** is a separate per-week snapshot of who started vs. was
   benched — that's what makes Choker of the Week and optimal-lineup%
@@ -130,8 +136,11 @@ Everything below lives under `/admin` (commissioner-only — gated on
    real stats automatically at `/admin/nhl-sync` (see below). CSV columns:
 
    ```
-   team, player, position, started, G, A, +/-, PIM, PPP, SOG, HIT, BLK, W, GAA, SV%, SO
+   team, player, position, started, G, A, PPP, SHP, SOG, PIM, HIT, BLK, W, GAA, SV%, SO
    ```
+
+   (Only enabled categories — the page itself always shows the current
+   list, so treat this as illustrative rather than authoritative.)
 
    `team` and `player` must exactly match an existing team name and a player
    already on that team's active roster (that's why transactions are logged
@@ -202,6 +211,12 @@ field-name list in `lib/nhl.ts`'s `aggregateSkaterStats`/
 place to fix if the real names differ.
 
 ## Player pages & the 0–100 rating (`/players`)
+
+The directory (`/players`) has a type-ahead search box
+(`components/players/PlayerSearchBar.tsx`) — filters the roster client-side
+as you type (name or team), shows a dropdown of up to 8 matches, and
+jumps straight to a player's page on click or Enter. No API round trip;
+the roster's small enough to filter in the browser.
 
 Every rostered player has a card (`components/totw/PlayerCard.tsx`) and a
 detail page (`/players/[playerId]`) showing:

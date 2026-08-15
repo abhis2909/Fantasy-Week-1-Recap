@@ -182,10 +182,17 @@ function mapSkaterGameEntry(raw: Record<string, unknown>): Record<string, number
   return {
     G: num(raw, "goals"),
     A: num(raw, "assists"),
-    "+/-": num(raw, "plusMinus"),
-    PIM: num(raw, "pim", "penaltyMinutes"),
     PPP: num(raw, "powerPlayPoints", "ppPoints"),
+    // Unverified against a live response like the rest of this file's
+    // field-name guesses (see the file-level caveat comment) — NHL's own
+    // stat pages call this "SH Points"/"shPoints" so that's the primary
+    // guess, with a goals+assists fallback in case the API only exposes
+    // the split components instead of a combined total.
+    SHP:
+      num(raw, "shorthandedPoints", "shPoints") ||
+      num(raw, "shorthandedGoals", "shGoals") + num(raw, "shorthandedAssists", "shAssists"),
     SOG: num(raw, "shots", "shotsOnGoal", "sog"),
+    PIM: num(raw, "pim", "penaltyMinutes"),
     HIT: num(raw, "hits"),
     BLK: num(raw, "blockedShots", "blocks"),
   };
@@ -223,7 +230,7 @@ export function aggregateSkaterStats(
   end: Date
 ): WeeklyNhlStatResult {
   const inRange = entries.filter((e) => gameDateInRange(e.gameDate, start, end));
-  const values: Record<string, number> = { G: 0, A: 0, "+/-": 0, PIM: 0, PPP: 0, SOG: 0, HIT: 0, BLK: 0 };
+  const values: Record<string, number> = { G: 0, A: 0, PPP: 0, SHP: 0, SOG: 0, PIM: 0, HIT: 0, BLK: 0 };
   for (const e of inRange) {
     const g = mapSkaterGameEntry(e.raw);
     for (const key of Object.keys(values)) values[key] += g[key];

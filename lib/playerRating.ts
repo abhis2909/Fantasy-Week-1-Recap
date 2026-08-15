@@ -53,7 +53,9 @@ export async function rateGamesForPlayer(playerId: string): Promise<RatedGame[]>
   if (player.gameLogs.length === 0) return [];
 
   const season = await getCurrentSeason();
-  const categories = await prisma.scoringCategory.findMany({ where: { leagueId: season.leagueId } });
+  const categories = await prisma.scoringCategory.findMany({
+    where: { leagueId: season.leagueId, enabled: true },
+  });
   const categoryByCode = new Map(categories.map((c) => [c.code, c]));
 
   function scoreValues(values: unknown): number {

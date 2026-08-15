@@ -19,11 +19,45 @@ export default async function AdminStatsPage({
   const selectedWeekId =
     (Array.isArray(sp.week) ? sp.week[0] : sp.week) || weeks[0]?.id;
   const categories = await prisma.scoringCategory.findMany({
-    where: { leagueId: season.leagueId },
+    where: { leagueId: season.leagueId, enabled: true },
     orderBy: { sortOrder: "asc" },
   });
   const errors = (Array.isArray(sp.errors) ? sp.errors : sp.errors ? [sp.errors] : []) as string[];
   const imported = Array.isArray(sp.imported) ? sp.imported[0] : sp.imported;
+
+  const needsCategoryUpdate =
+    !categories.some((c) => c.code === "SHP") ||
+    (await prisma.scoringCategory.findFirst({
+      where: { leagueId: season.leagueId, code: "+/-", enabled: true },
+    })) !== null;
+  const categoriesUpdated = sp.categoriesUpdated === "1";
+
+  async function updateScoringCategories() {
+    "use server";
+    const skaterPositions = ["C", "LW", "RW", "D"] as const;
+    // Same slot the old Plus/Minus category held, so the new column lands
+    // in roughly the same place instead of at the end of the list.
+    await prisma.scoringCategory.upsert({
+      where: { leagueId_code: { leagueId: season.leagueId, code: "SHP" } },
+      create: {
+        leagueId: season.leagueId,
+        code: "SHP",
+        label: "Shorthanded Points",
+        appliesTo: [...skaterPositions],
+        higherIsBetter: true,
+        sortOrder: 3,
+      },
+      update: { enabled: true },
+    });
+    await prisma.scoringCategory.updateMany({
+      where: { leagueId: season.leagueId, code: "+/-" },
+      data: { enabled: false },
+    });
+    revalidatePath("/admin/stats");
+    revalidatePath("/standings");
+    revalidatePath("/categories");
+    redirect("/admin/stats?categoriesUpdated=1");
+  }
 
   async function uploadCsv(formData: FormData) {
     "use server";
@@ -45,6 +79,38 @@ export default async function AdminStatsPage({
   return (
     <>
       <PageHeader title="Stat Lines" subtitle="Upload a week's per-player stats via CSV." />
+
+      {(needsCategoryUpdate || categoriesUpdated) && (
+        <SectionCard title="Update scoring categories">
+          {categoriesUpdated ? (
+            <HighlightBox title="Categories updated">
+              Shorthanded Points is now a live category; Plus/Minus is retired (its history is
+              kept, just no longer shown or scored going forward).
+            </HighlightBox>
+          ) : (
+            <>
+              <p className="text-cream/80">
+                This league&apos;s actual category set is Goals, Assists, Power Play Points,
+                Shorthanded Points, Shots on Goal, Penalty Minutes, Hits, and Blocks for
+                skaters — Wins, GAA, SV%, and Shutouts for goalies. The categories currently
+                configured still include Plus/Minus and are missing Shorthanded Points. This
+                adds Shorthanded Points and retires Plus/Minus (its historical data stays in
+                the database, it just stops counting toward standings and stops being
+                displayed going forward). Existing weeks aren&apos;t retroactively
+                recomputed — only the current league configuration changes.
+              </p>
+              <form action={updateScoringCategories}>
+                <button
+                  type="submit"
+                  className="mt-3 rounded-lg bg-gold px-4 py-2 text-sm font-semibold text-navy-deep transition hover:bg-gold-bright"
+                >
+                  Add Shorthanded Points, retire Plus/Minus
+                </button>
+              </form>
+            </>
+          )}
+        </SectionCard>
+      )}
 
       <SectionCard title="Expected format">
         <p className="text-sm text-cream/80">

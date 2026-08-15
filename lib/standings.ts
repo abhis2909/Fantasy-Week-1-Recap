@@ -98,7 +98,9 @@ export async function computeCategoryTotals(
   });
   const season = await prisma.season.findUniqueOrThrow({
     where: { id: seasonId },
-    include: { league: { include: { categories: { orderBy: { sortOrder: "asc" } } } } },
+    include: {
+      league: { include: { categories: { where: { enabled: true }, orderBy: { sortOrder: "asc" } } } },
+    },
   });
   const categories = season.league.categories;
 

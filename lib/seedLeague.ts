@@ -109,10 +109,10 @@ const SKATER_POSITIONS: Position[] = ["C", "LW", "RW", "D"];
 const CATEGORY_DEFS = [
   { code: "G", label: "Goals", appliesTo: SKATER_POSITIONS, higherIsBetter: true, sortOrder: 1 },
   { code: "A", label: "Assists", appliesTo: SKATER_POSITIONS, higherIsBetter: true, sortOrder: 2 },
-  { code: "+/-", label: "Plus/Minus", appliesTo: SKATER_POSITIONS, higherIsBetter: true, sortOrder: 3 },
-  { code: "PIM", label: "Penalty Minutes", appliesTo: SKATER_POSITIONS, higherIsBetter: true, sortOrder: 4 },
-  { code: "PPP", label: "Power Play Points", appliesTo: SKATER_POSITIONS, higherIsBetter: true, sortOrder: 5 },
-  { code: "SOG", label: "Shots on Goal", appliesTo: SKATER_POSITIONS, higherIsBetter: true, sortOrder: 6 },
+  { code: "PPP", label: "Power Play Points", appliesTo: SKATER_POSITIONS, higherIsBetter: true, sortOrder: 3 },
+  { code: "SHP", label: "Shorthanded Points", appliesTo: SKATER_POSITIONS, higherIsBetter: true, sortOrder: 4 },
+  { code: "SOG", label: "Shots on Goal", appliesTo: SKATER_POSITIONS, higherIsBetter: true, sortOrder: 5 },
+  { code: "PIM", label: "Penalty Minutes", appliesTo: SKATER_POSITIONS, higherIsBetter: true, sortOrder: 6 },
   { code: "HIT", label: "Hits", appliesTo: SKATER_POSITIONS, higherIsBetter: true, sortOrder: 7 },
   { code: "BLK", label: "Blocked Shots", appliesTo: SKATER_POSITIONS, higherIsBetter: true, sortOrder: 8 },
   { code: "W", label: "Wins", appliesTo: ["G"] as Position[], higherIsBetter: true, sortOrder: 9 },
@@ -128,10 +128,12 @@ function statsForSkater(tier: Tier): Record<string, number> {
   return {
     G: randInt(0, Math.round(4 * mult) + 1),
     A: randInt(0, Math.round(5 * mult) + 1),
-    "+/-": randInt(-2, Math.round(3 * mult) + 2),
-    PIM: randInt(0, 6),
     PPP: randInt(0, Math.round(2 * mult) + 1),
+    // Shorthanded points are genuinely rare in real hockey — most players
+    // most weeks have 0, and even stars only occasionally pick one up.
+    SHP: rng() < (tier === "star" ? 0.12 : 0.04) ? 1 : 0,
     SOG: randInt(2, Math.round(10 * mult) + 4),
+    PIM: randInt(0, 6),
     HIT: randInt(0, 8),
     BLK: randInt(0, 6),
   };
@@ -328,10 +330,10 @@ export async function seedLeague(prisma: PrismaClient): Promise<SeedResult> {
   if (chokerBenchPlayerId && chokerStartedPlayerId) {
     console.log("Engineering a Choker of the Week scenario...");
     const heroStats: Record<string, number> = {
-      G: 4, A: 3, "+/-": 3, PIM: 0, PPP: 2, SOG: 9, HIT: 3, BLK: 2,
+      G: 4, A: 3, PPP: 2, SHP: 1, PIM: 0, SOG: 9, HIT: 3, BLK: 2,
     };
     const dudStats: Record<string, number> = {
-      G: 0, A: 0, "+/-": -2, PIM: 2, PPP: 0, SOG: 1, HIT: 0, BLK: 0,
+      G: 0, A: 0, PPP: 0, SHP: 0, PIM: 2, SOG: 1, HIT: 0, BLK: 0,
     };
     for (const [code, value] of Object.entries(heroStats)) {
       const category = categoryByCode.get(code)!;

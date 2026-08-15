@@ -127,6 +127,13 @@ model ScoringCategory {
   /// false for categories like GAA where a lower value is better.
   higherIsBetter Boolean    @default(true)
   sortOrder      Int        @default(0)
+  /// Retiring a category (the league's real set changed) sets this false
+  /// instead of deleting the row — deleting would cascade-drop every
+  /// historical StatLine/MatchupCategoryResult for it, silently rewriting
+  /// past weeks' results. Disabled categories are excluded from anything
+  /// that represents "the league's current categories" but their history
+  /// stays intact.
+  enabled        Boolean    @default(true)
 
   statLines       StatLine[]
   categoryResults MatchupCategoryResult[]

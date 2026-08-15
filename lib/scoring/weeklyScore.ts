@@ -21,9 +21,11 @@
 export const DEFAULT_CATEGORY_WEIGHTS: Record<string, number> = {
   G: 3,
   A: 2,
-  "+/-": 1,
-  PIM: 0.2,
   PPP: 0.5,
+  // Rarer than PPP (most players get 0 in a given week), so worth more
+  // per occurrence when one does happen.
+  SHP: 2,
+  PIM: 0.2,
   SOG: 0.1,
   HIT: 0.2,
   BLK: 0.2,

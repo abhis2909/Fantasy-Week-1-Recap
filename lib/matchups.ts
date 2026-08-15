@@ -39,7 +39,9 @@ export async function computeAndSaveMatchup(
 ) {
   const week = await prisma.week.findUniqueOrThrow({
     where: { id: weekId },
-    include: { season: { include: { league: { include: { categories: true } } } } },
+    include: {
+      season: { include: { league: { include: { categories: { where: { enabled: true } } } } } },
+    },
   });
   const categories = week.season.league.categories;
 

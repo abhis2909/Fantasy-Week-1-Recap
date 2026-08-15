@@ -45,7 +45,9 @@ export async function importStatLinesCsv(
 ): Promise<ImportResult> {
   const week = await prisma.week.findUnique({
     where: { id: weekId },
-    include: { season: { include: { league: { include: { categories: true } } } } },
+    include: {
+      season: { include: { league: { include: { categories: { where: { enabled: true } } } } } },
+    },
   });
   if (!week) return { ok: false, imported: 0, errors: ["Week not found."] };
 
