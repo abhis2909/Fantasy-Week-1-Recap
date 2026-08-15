@@ -20,8 +20,8 @@ import {
   NHL_GAME_TYPE_REGULAR_SEASON,
   NHL_TEAM_ABBREVS,
 } from "@/lib/nhl";
-import { depthNamesFor, isLegacyFictionalName } from "@/lib/depthPlayerNames";
-import type { Position } from "@/lib/generated/prisma/client";
+import { isLegacyFictionalName } from "@/lib/depthPlayerNames";
+import { renameLegacyFictionalPlayers } from "@/lib/playerCleanup";
 
 // Bulk-syncing a whole roster against an external API can run long —
 // each player needs 1-2 outbound requests. Raise the ceiling above
@@ -77,61 +77,9 @@ export default async function NhlSyncPage({
 
   const gameLogCount = await prisma.playerGameLog.count();
 
-  /** Shuffles in place with plain Math.random — this is a one-time, non-
-   * reproducible production cleanup, not the seed fixture, so it doesn't
-   * need the seed's deterministic RNG. */
-  function shuffle<T>(arr: T[]): T[] {
-    const copy = [...arr];
-    for (let i = copy.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [copy[i], copy[j]] = [copy[j], copy[i]];
-    }
-    return copy;
-  }
-
   async function cleanupFictionalNames() {
     "use server";
-    const all = await prisma.player.findMany();
-    const usedNames = new Set(all.map((p) => p.fullName));
-    const targets = all.filter((p) => isLegacyFictionalName(p.fullName));
-
-    const pools: Record<Position, string[]> = {
-      C: shuffle(depthNamesFor("C")),
-      LW: shuffle(depthNamesFor("LW")),
-      RW: shuffle(depthNamesFor("RW")),
-      D: shuffle(depthNamesFor("D")),
-      G: shuffle(depthNamesFor("G")),
-    };
-
-    let renamed = 0;
-    const failed: string[] = [];
-    for (const player of targets) {
-      const pool = pools[player.primaryPosition];
-      let newName: string | undefined;
-      while (pool.length > 0) {
-        const candidate = pool.pop()!;
-        if (!usedNames.has(candidate)) {
-          newName = candidate;
-          break;
-        }
-      }
-      if (!newName) {
-        failed.push(player.fullName);
-        continue;
-      }
-      usedNames.add(newName);
-      // Only the name changes — same Player.id, so every RosterEntry,
-      // StatLine, Transaction, etc. still points at the same player and
-      // nothing else about the league's history moves. Clear photoUrl/
-      // externalId too so the next photo sync fetches this (now-real)
-      // person's actual headshot instead of leaving a stale placeholder.
-      await prisma.player.update({
-        where: { id: player.id },
-        data: { fullName: newName, photoUrl: null, externalId: null, externalSource: "MANUAL" },
-      });
-      renamed++;
-    }
-
+    const { renamed, failed } = await renameLegacyFictionalPlayers();
     revalidatePath("/admin/nhl-sync");
     redirect(
       `/admin/nhl-sync?${qs({ cleanupRenamed: renamed })}${failed.map((n) => `&cleanupFailed=${encodeURIComponent(n)}`).join("")}`

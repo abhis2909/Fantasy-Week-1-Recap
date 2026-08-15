@@ -170,6 +170,12 @@ with a key/ToS.
   same `Player.id`, so all existing roster history/stats/transactions stay
   attached — so the whole roster becomes sync-able. Fresh seeds no longer
   generate fictional names in the first place (`lib/depthPlayerNames.ts`).
+  The actual rename logic lives in `lib/playerCleanup.ts`, shared by this
+  button and by `GET /api/admin/cleanup-fictional-names` — a plain link
+  that does the same thing without going through a server action, for when
+  the button itself errors out (see the stale-action-ID note below). Visit
+  it directly while signed in as commissioner; safe to reload/re-run any
+  time, it's a no-op once nothing's left to rename.
 - **Photos & matching**: for every `Player`, searches NHL.com by exact
   (case-insensitive) name among currently-active players only, and on a
   match, saves their real headshot and NHL player ID (`Player.photoUrl` /
