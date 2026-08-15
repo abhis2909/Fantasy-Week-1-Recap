@@ -4,6 +4,7 @@ import { auth } from "@/lib/auth";
 
 const ADMIN_LINKS = [
   { href: "/admin", label: "Overview" },
+  { href: "/admin/nhl-sync", label: "NHL Sync" },
   { href: "/admin/matchups", label: "Matchup Results" },
   { href: "/admin/stats", label: "Stat Lines" },
   { href: "/admin/transactions/new", label: "Log Transaction" },

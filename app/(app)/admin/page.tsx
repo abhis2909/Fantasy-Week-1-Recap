@@ -4,6 +4,11 @@ import { SectionCard } from "@/components/ui/SectionCard";
 
 const CARDS = [
   {
+    href: "/admin/nhl-sync",
+    title: "NHL Sync",
+    body: "Pull real player photos and weekly stats from the NHL's API.",
+  },
+  {
     href: "/admin/matchups",
     title: "Matchup Results",
     body: "Enter this week's category-by-category matchup totals.",

@@ -23,6 +23,7 @@ to someone) or to reach `/admin` as the commissioner.
 | Transactions + 1–10 peer ratings | `/transactions`, `lib/transactions.ts` |
 | Weekly recap newsletter | `/recaps`, `lib/recap/*` |
 | Commissioner data entry | `/admin/*` |
+| NHL player photos + auto-stat sync | `/admin/nhl-sync`, `lib/nhl.ts` |
 
 ## Getting started
 
@@ -124,7 +125,8 @@ Everything below lives under `/admin` (commissioner-only — gated on
 2. **Log any transactions** that happened — `/admin/transactions/new`. Adds
    create a brand-new `Player`; drops and trades operate on existing active
    roster entries.
-3. **Import stat lines** — `/admin/stats`, CSV upload. Expected columns:
+3. **Import stat lines** — either upload a CSV at `/admin/stats`, or pull
+   real stats automatically at `/admin/nhl-sync` (see below). CSV columns:
 
    ```
    team, player, position, started, G, A, +/-, PIM, PPP, SOG, HIT, BLK, W, GAA, SV%, SO
@@ -143,6 +145,39 @@ Everything below lives under `/admin` (commissioner-only — gated on
    "Generate draft" → review/edit each section inline → "Publish". Every
    regeneration replaces the draft and un-publishes the article, so a bad
    regen can never silently overwrite what's already live.
+
+## NHL player sync (`/admin/nhl-sync`)
+
+Uses NHL.com's own unofficial, undocumented API (the same one its search bar
+and stats pages run on) — there's no official public NHL developer program
+with a key/ToS. Two independent actions:
+
+- **Photos & matching**: for every `Player`, searches NHL.com by exact
+  (case-insensitive) name and, on a match, saves their real headshot and NHL
+  player ID (`Player.photoUrl` / `externalId`). Players with no exact match
+  (typos, retired players, the seed fixture's synthetic bench names) are
+  left on the generic per-position illustration and reported as skipped —
+  nothing is guessed.
+- **Weekly stat sync**: for a chosen week, fetches each rostered player's
+  real NHL game log, sums the games falling inside that week's date range
+  into your league's scoring categories, and writes `StatLine` rows
+  (`source: NHL_SYNC`). It also creates a `WeeklyRosterSlot` for anyone
+  missing one, **defaulting everyone to started** — it has no way to know
+  your lineup decisions, only real game results. Use the CSV upload
+  afterward if you need to mark someone benched or correct a value; a later
+  write to the same (week, player, category) always wins, from either path.
+
+**Caveat that matters**: the search/landing endpoint shapes were confirmed
+against a community API reference
+([Zmalski/NHL-API-Reference](https://github.com/Zmalski/NHL-API-Reference)),
+but the per-game **stat field names** used by weekly sync (`goals`,
+`assists`, `pim`, `powerPlayPoints`, etc.) are a best-effort guess — this
+sandbox couldn't reach `api-web.nhle.com` to verify a live response before
+shipping this. If synced numbers look wrong (all zero is the likely
+symptom), use the **"Debug: preview a raw NHL response"** box on that page
+to see a real player's actual JSON, and the field-name list in
+`lib/nhl.ts`'s `aggregateSkaterStats`/`aggregateGoalieStats` is the one
+place to fix if the real names differ.
 
 ## Design system
 

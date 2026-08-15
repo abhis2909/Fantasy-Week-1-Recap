@@ -33,12 +33,13 @@ enum Position {
 }
 
 /// Where a row's data came from. Every domain row that could plausibly be
-/// synced from Yahoo one day carries this, so a future Yahoo sync job is just
+/// synced from an external source carries this, so a sync job is just
 /// another writer into the same tables instead of a schema rewrite.
 enum DataSource {
   MANUAL
   CSV_IMPORT
   YAHOO_SYNC
+  NHL_SYNC
 }
 
 enum TransactionType {

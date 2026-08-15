@@ -181,10 +181,13 @@ export async function seedLeague(prisma: PrismaClient): Promise<SeedResult> {
   console.log("Wiping existing data...");
   // Order matters: children before parents. onDelete: Cascade handles most of
   // this already, but deleting League cascades everything below it, so this
-  // is really just "delete every league" plus Users, which aren't
-  // League-scoped.
+  // is really just "delete every league" plus Users and Players, neither of
+  // which are League-scoped in the schema (Player especially: it's a global
+  // pool so a future Yahoo/NHL sync can share player identities across
+  // seasons) and so aren't cascade-deleted by removing the League.
   await prisma.transactionRating.deleteMany();
   await prisma.league.deleteMany();
+  await prisma.player.deleteMany();
   await prisma.user.deleteMany();
 
   console.log("Creating league, season, categories...");
