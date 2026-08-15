@@ -1,22 +1,18 @@
 import type { Position } from "@/lib/generated/prisma/client";
 
 /**
- * Generic per-position illustrated avatars (pulled from the original
- * mockup's assets) used whenever a Player has no real `photoUrl` — which,
- * for the manual/CSV-entry MVP, is effectively always. These are decorative
- * placeholders, not likenesses of any specific real player.
+ * Generic placeholder shown whenever a Player has no real synced
+ * `photoUrl` (no NHL match found, or photos haven't been synced yet) — a
+ * flat black silhouette, not a likeness of any specific real player.
+ * Previously five different per-position illustrations; simplified to one
+ * generic image so an unmatched player reads clearly as "no photo yet"
+ * rather than looking like a real (if cartoonish) headshot.
  */
-const POSITION_AVATARS: Record<Position, string> = {
-  C: "/images/positions/c.png",
-  LW: "/images/positions/lw.png",
-  RW: "/images/positions/rw.png",
-  D: "/images/positions/d.png",
-  G: "/images/positions/g.webp",
-};
+const GENERIC_AVATAR = "/images/positions/generic-black.svg";
 
 export function avatarForPlayer(player: {
   photoUrl?: string | null;
   primaryPosition: Position;
 }): string {
-  return player.photoUrl || POSITION_AVATARS[player.primaryPosition];
+  return player.photoUrl || GENERIC_AVATAR;
 }

@@ -303,10 +303,18 @@ animates once on mount, since it's always already in view.
 
 An earlier iteration used a cream/red/blue palette pulled from a static
 mockup (`fantasywebsite/index.html`, preserved in git history at commit
-`1f3a475`) — superseded by the above, but the per-position illustrated
-player avatars in `public/images/positions/` are still from that mockup
-(generic placeholders, not real player likenesses) and the arena photo
-backdrop (`public/images/arena-hero.jpg`) is reused on the sign-in page.
+`1f3a475`) — superseded by the above. The arena photo backdrop
+(`public/images/arena-hero.jpg`) from that mockup is still reused on the
+sign-in page.
+
+`avatarForPlayer` (`lib/positionAvatar.ts`) falls back to one generic flat
+black silhouette (`public/images/positions/generic-black.svg`) for any
+player with no real synced `photoUrl` — deliberately plain, so an
+unmatched player reads clearly as "no photo yet" rather than looking like
+an actual (if cartoonish) headshot. It's an SVG, so `next.config.ts` sets
+`images.dangerouslyAllowSVG` (with a locked-down `contentSecurityPolicy`,
+per Next's own recommendation) — `next/image` otherwise refuses to render
+SVGs at all.
 
 ## Algorithms worth knowing about
 
