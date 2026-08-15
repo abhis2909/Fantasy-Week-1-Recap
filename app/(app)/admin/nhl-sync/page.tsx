@@ -10,6 +10,7 @@ import {
   getNhlHeadshotUrl,
   getPlayerGameLog,
   getRawGameLogJson,
+  getRawSearchJson,
   aggregateSkaterStats,
   aggregateGoalieStats,
   mapGameLogToPerGameValues,
@@ -47,6 +48,10 @@ export default async function NhlSyncPage({
   const debugName = Array.isArray(sp.debugName) ? sp.debugName[0] : sp.debugName;
   const debugResult = Array.isArray(sp.debugResult) ? sp.debugResult[0] : sp.debugResult;
   const debugError = Array.isArray(sp.debugError) ? sp.debugError[0] : sp.debugError;
+
+  const debugSearchName = Array.isArray(sp.debugSearchName) ? sp.debugSearchName[0] : sp.debugSearchName;
+  const debugSearchResult = Array.isArray(sp.debugSearchResult) ? sp.debugSearchResult[0] : sp.debugSearchResult;
+  const debugSearchError = Array.isArray(sp.debugSearchError) ? sp.debugSearchError[0] : sp.debugSearchError;
 
   const gamesMatched = Array.isArray(sp.gamesMatched) ? sp.gamesMatched[0] : sp.gamesMatched;
   const gamesSynced = Array.isArray(sp.gamesSynced) ? sp.gamesSynced[0] : sp.gamesSynced;
@@ -225,6 +230,21 @@ export default async function NhlSyncPage({
     );
   }
 
+  async function debugSearchPreview(formData: FormData) {
+    "use server";
+    const name = (formData.get("debugSearchName") as string)?.trim();
+    if (!name) return;
+    try {
+      const raw = await getRawSearchJson(name);
+      const preview = JSON.stringify(raw, null, 2).slice(0, 4000);
+      redirect(`/admin/nhl-sync?${qs({ debugSearchName: name, debugSearchResult: preview })}`);
+    } catch (err) {
+      redirect(
+        `/admin/nhl-sync?${qs({ debugSearchName: name, debugSearchError: err instanceof Error ? err.message : "Unknown error" })}`
+      );
+    }
+  }
+
   async function debugPreview(formData: FormData) {
     "use server";
     const name = (formData.get("debugName") as string)?.trim();
@@ -342,10 +362,41 @@ export default async function NhlSyncPage({
         </form>
       </SectionCard>
 
-      <SectionCard title="Debug: preview a raw NHL response">
+      <SectionCard title="Debug: preview a raw NHL search response">
+        <p className="mb-3 text-sm text-cream/70">
+          If matching is failing for everyone (even real players like &quot;Connor
+          McDavid&quot;), the search request itself is likely fine but returning a shape
+          the code doesn&apos;t expect. This shows the untouched JSON straight from NHL&apos;s
+          search endpoint, no parsing applied — paste the result back to get the matcher
+          fixed.
+        </p>
+        {debugSearchError && <HighlightBox title="Couldn't fetch">{debugSearchError}</HighlightBox>}
+        <form action={debugSearchPreview} className="mb-3 flex flex-wrap gap-3">
+          <input
+            name="debugSearchName"
+            defaultValue={debugSearchName}
+            placeholder="e.g. Connor McDavid"
+            className="rounded-lg border border-white/20 bg-white/10 px-3 py-2 text-white placeholder-cream/50"
+          />
+          <button
+            type="submit"
+            className="rounded-lg border-2 border-gold px-4 py-2 text-sm font-semibold text-gold transition hover:bg-gold/10"
+          >
+            Preview raw search response
+          </button>
+        </form>
+        {debugSearchResult && (
+          <pre className="max-h-96 overflow-auto rounded-lg bg-black/40 p-4 text-xs text-cream/90">
+            {debugSearchResult}
+          </pre>
+        )}
+      </SectionCard>
+
+      <SectionCard title="Debug: preview a raw NHL game-log response">
         <p className="mb-3 text-sm text-cream/70">
           Type a player&apos;s exact name to see their raw NHL game-log JSON — useful for
-          checking the actual field names if stat sync results look wrong.
+          checking the actual field names if stat sync results look wrong. Requires the
+          search matcher above to be working first.
         </p>
         {debugError && <HighlightBox title="Couldn't fetch">{debugError}</HighlightBox>}
         <form action={debugPreview} className="mb-3 flex flex-wrap gap-3">

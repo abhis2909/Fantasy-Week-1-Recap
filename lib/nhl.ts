@@ -28,9 +28,12 @@ export interface NhlSearchMatch {
   teamAbbrev?: string;
 }
 
+function searchUrl(query: string): string {
+  return `${SEARCH_URL}?culture=en-us&limit=10&q=${encodeURIComponent(query)}`;
+}
+
 export async function searchNhlPlayers(query: string): Promise<NhlSearchMatch[]> {
-  const url = `${SEARCH_URL}?culture=en-us&limit=10&q=${encodeURIComponent(query)}`;
-  const res = await fetch(url, { headers: { Accept: "application/json" } });
+  const res = await fetch(searchUrl(query), { headers: { Accept: "application/json" } });
   if (!res.ok) throw new Error(`NHL search request failed (${res.status})`);
   const json = await res.json();
   const parsed = z.array(SearchMatchSchema).safeParse(json);
@@ -41,6 +44,15 @@ export async function searchNhlPlayers(query: string): Promise<NhlSearchMatch[]>
     active: r.active ?? true,
     teamAbbrev: r.teamAbbrev,
   }));
+}
+
+/** For live debugging: the untouched parsed JSON body from the search
+ * endpoint, no schema validation — lets us see the real shape when
+ * searchNhlPlayers's zod parse rejects it. */
+export async function getRawSearchJson(query: string): Promise<unknown> {
+  const res = await fetch(searchUrl(query), { headers: { Accept: "application/json" } });
+  if (!res.ok) throw new Error(`NHL search request failed (${res.status})`);
+  return res.json();
 }
 
 const LandingSchema = z.object({ headshot: z.string().optional() }).passthrough();
