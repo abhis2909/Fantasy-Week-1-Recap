@@ -11,11 +11,14 @@ import {
   getPlayerGameLog,
   getRawGameLogJson,
   getRawSearchJson,
+  getTeamRoster,
+  getRawTeamRosterJson,
   aggregateSkaterStats,
   aggregateGoalieStats,
   mapGameLogToPerGameValues,
   mapWithConcurrency,
   NHL_GAME_TYPE_REGULAR_SEASON,
+  NHL_TEAM_ABBREVS,
 } from "@/lib/nhl";
 import { depthNamesFor, isLegacyFictionalName } from "@/lib/depthPlayerNames";
 import type { Position } from "@/lib/generated/prisma/client";
@@ -63,6 +66,14 @@ export default async function NhlSyncPage({
   const gamesSynced = Array.isArray(sp.gamesSynced) ? sp.gamesSynced[0] : sp.gamesSynced;
   const gamesSkipped = (Array.isArray(sp.gamesSkipped) ? sp.gamesSkipped : sp.gamesSkipped ? [sp.gamesSkipped] : []) as string[];
   const gamesErrored = (Array.isArray(sp.gamesErrored) ? sp.gamesErrored : sp.gamesErrored ? [sp.gamesErrored] : []) as string[];
+
+  const poolCreated = Array.isArray(sp.poolCreated) ? sp.poolCreated[0] : sp.poolCreated;
+  const poolMatched = Array.isArray(sp.poolMatched) ? sp.poolMatched[0] : sp.poolMatched;
+  const poolErrored = (Array.isArray(sp.poolErrored) ? sp.poolErrored : sp.poolErrored ? [sp.poolErrored] : []) as string[];
+
+  const debugRosterTeam = Array.isArray(sp.debugRosterTeam) ? sp.debugRosterTeam[0] : sp.debugRosterTeam;
+  const debugRosterResult = Array.isArray(sp.debugRosterResult) ? sp.debugRosterResult[0] : sp.debugRosterResult;
+  const debugRosterError = Array.isArray(sp.debugRosterError) ? sp.debugRosterError[0] : sp.debugRosterError;
 
   const gameLogCount = await prisma.playerGameLog.count();
 
@@ -299,6 +310,89 @@ export default async function NhlSyncPage({
     );
   }
 
+  /**
+   * Pre-loads every current NHL player as a free agent — ahead of actually
+   * needing them, so the pool is ready once a real add/drop or a future
+   * Yahoo sync needs to find someone who isn't already on a fantasy roster.
+   * De-dupes against already-known players two ways: by externalId (a
+   * player already NHL-matched) and by exact name (a player already on a
+   * fantasy roster but not yet NHL-matched) — either way, that existing
+   * Player row gets updated in place rather than a duplicate being created.
+   */
+  async function importFullNhlPool() {
+    "use server";
+    const existing = await prisma.player.findMany();
+    const byExternalId = new Map(existing.filter((p) => p.externalId).map((p) => [p.externalId!, p]));
+    const byName = new Map(existing.map((p) => [p.fullName.trim().toLowerCase(), p]));
+
+    let created = 0;
+    let matched = 0;
+    const errored: string[] = [];
+
+    await mapWithConcurrency([...NHL_TEAM_ABBREVS], 4, async (teamAbbrev) => {
+      try {
+        const roster = await getTeamRoster(teamAbbrev);
+        for (const p of roster) {
+          const externalId = String(p.nhlPlayerId);
+          if (byExternalId.has(externalId)) continue;
+
+          const existingByName = byName.get(p.name.trim().toLowerCase());
+          if (existingByName) {
+            await prisma.player.update({
+              where: { id: existingByName.id },
+              data: {
+                externalId,
+                photoUrl: p.headshot ?? existingByName.photoUrl,
+                externalSource: "NHL_SYNC",
+              },
+            });
+            byExternalId.set(externalId, existingByName);
+            matched++;
+            continue;
+          }
+
+          const created_ = await prisma.player.create({
+            data: {
+              fullName: p.name,
+              primaryPosition: p.position,
+              externalId,
+              photoUrl: p.headshot,
+              externalSource: "NHL_SYNC",
+            },
+          });
+          byExternalId.set(externalId, created_);
+          byName.set(p.name.trim().toLowerCase(), created_);
+          created++;
+        }
+      } catch (err) {
+        errored.push(`${teamAbbrev} (${err instanceof Error ? err.message : "unknown error"})`);
+      }
+    });
+
+    revalidatePath("/admin/nhl-sync");
+    revalidatePath("/players");
+    redirect(
+      `/admin/nhl-sync?${qs({ poolCreated: created, poolMatched: matched })}${errored.map((e) => `&poolErrored=${encodeURIComponent(e)}`).join("")}`
+    );
+  }
+
+  async function debugRosterPreview(formData: FormData) {
+    "use server";
+    const team = (formData.get("debugRosterTeam") as string)?.trim().toUpperCase();
+    if (!team) return;
+    let result: string | null = null;
+    let error: string | null = null;
+    try {
+      const raw = await getRawTeamRosterJson(team);
+      result = JSON.stringify(raw, null, 2).slice(0, 4000);
+    } catch (err) {
+      error = err instanceof Error ? err.message : "Unknown error";
+    }
+    redirect(
+      `/admin/nhl-sync?${qs(result !== null ? { debugRosterTeam: team, debugRosterResult: result } : { debugRosterTeam: team, debugRosterError: error! })}`
+    );
+  }
+
   async function debugSearchPreview(formData: FormData) {
     "use server";
     const name = (formData.get("debugSearchName") as string)?.trim();
@@ -469,6 +563,66 @@ export default async function NhlSyncPage({
             Sync full season game logs
           </button>
         </form>
+      </SectionCard>
+
+      <SectionCard title="Full NHL player pool (free agents)">
+        <p className="mb-4 text-cream/80">
+          {players.length} players currently in the database (rostered + free agents). Pre-loads
+          every current player on all 32 NHL rosters as a searchable free agent — so the full
+          pool is ready ahead of a real add/drop or a future Yahoo sync, not just the players
+          already on a fantasy roster. Safe to re-run: players already known (by NHL ID or exact
+          name) are matched up rather than duplicated. This calls the NHL API 32 times, so it can
+          take up to a minute.
+        </p>
+        {poolCreated && (
+          <HighlightBox title="Import complete">
+            <p>
+              Added {poolCreated} new free agent{poolCreated === "1" ? "" : "s"}, matched{" "}
+              {poolMatched} existing player{poolMatched === "1" ? "" : "s"} to their NHL record.
+            </p>
+            {poolErrored.length > 0 && (
+              <p className="mt-2 text-danger">Teams that failed: {poolErrored.join(", ")}</p>
+            )}
+          </HighlightBox>
+        )}
+        <form action={importFullNhlPool}>
+          <button
+            type="submit"
+            className="mt-2 rounded-lg bg-gold px-4 py-2 text-sm font-semibold text-navy-deep transition hover:bg-gold-bright"
+          >
+            Import full NHL player pool
+          </button>
+        </form>
+      </SectionCard>
+
+      <SectionCard title="Debug: preview a raw NHL roster response">
+        <p className="mb-3 text-sm text-cream/70">
+          The roster endpoint&apos;s shape (unlike search/game-log above) hasn&apos;t been
+          verified against a live response at all — if the pool import above reports errors for
+          every team, this shows the real JSON for one team so the parser in{" "}
+          <code className="text-white">lib/nhl.ts</code>&apos;s <code className="text-white">getTeamRoster</code>{" "}
+          can be fixed to match.
+        </p>
+        {debugRosterError && <HighlightBox title="Couldn't fetch">{debugRosterError}</HighlightBox>}
+        <form action={debugRosterPreview} className="mb-3 flex flex-wrap gap-3">
+          <input
+            name="debugRosterTeam"
+            defaultValue={debugRosterTeam}
+            placeholder="e.g. EDM"
+            className="w-32 rounded-lg border border-white/20 bg-white/10 px-3 py-2 text-white placeholder-cream/50 uppercase"
+          />
+          <button
+            type="submit"
+            className="rounded-lg border-2 border-gold px-4 py-2 text-sm font-semibold text-gold transition hover:bg-gold/10"
+          >
+            Preview raw roster response
+          </button>
+        </form>
+        {debugRosterResult && (
+          <pre className="max-h-96 overflow-auto rounded-lg bg-black/40 p-4 text-xs text-cream/90">
+            {debugRosterResult}
+          </pre>
+        )}
       </SectionCard>
 
       <SectionCard title="Debug: preview a raw NHL search response">

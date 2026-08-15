@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { Position } from "@/lib/generated/prisma/client";
 
 /**
  * NHL.com's own (unofficial, undocumented) player search + profile API —
@@ -270,6 +271,92 @@ export function aggregateGoalieStats(
       : 0;
 
   return { values: { W: wins, GAA: gaa, "SV%": svPct, SO: shutouts }, gamesFound: inRange.length };
+}
+
+// ---------------------------------------------------------------------------
+// Full team rosters — for pre-loading the entire active NHL player pool as
+// free agents, ahead of needing them (e.g. before a future Yahoo sync can
+// tell us who's actually rostered). One call per team; there's no "list
+// every active player" endpoint, only per-team rosters.
+//
+// UNVERIFIED like the game-log endpoint above: the shape below is a
+// best-effort guess (nested {default: "..."} name objects are how several
+// other NHL API responses represent localized strings, per the community
+// reference), not confirmed against a live response. Use
+// getRawTeamRosterJson via the debug tool before trusting an import.
+// ---------------------------------------------------------------------------
+
+/** Current 32 NHL teams' 3-letter abbreviations, as used in API URLs. */
+export const NHL_TEAM_ABBREVS = [
+  "ANA", "BOS", "BUF", "CGY", "CAR", "CHI", "COL", "CBJ",
+  "DAL", "DET", "EDM", "FLA", "LAK", "MIN", "MTL", "NSH",
+  "NJD", "NYI", "NYR", "OTT", "PHI", "PIT", "SJS", "SEA",
+  "STL", "TBL", "TOR", "UTA", "VAN", "VGK", "WSH", "WPG",
+] as const;
+
+const rosterUrl = (teamAbbrev: string) => `https://api-web.nhle.com/v1/roster/${teamAbbrev}/current`;
+
+const LocalizedNameSchema = z.union([z.string(), z.object({ default: z.string() }).passthrough()]);
+function localizedName(v: z.infer<typeof LocalizedNameSchema>): string {
+  return typeof v === "string" ? v : v.default;
+}
+
+const RosterPlayerSchema = z
+  .object({
+    id: z.coerce.number(),
+    firstName: LocalizedNameSchema,
+    lastName: LocalizedNameSchema,
+    positionCode: z.string(),
+    headshot: z.string().optional(),
+  })
+  .passthrough();
+
+function mapNhlRosterPosition(code: string): Position {
+  switch (code.toUpperCase()) {
+    case "L":
+      return "LW";
+    case "R":
+      return "RW";
+    case "D":
+      return "D";
+    case "G":
+      return "G";
+    default:
+      return "C";
+  }
+}
+
+export interface NhlRosterPlayer {
+  nhlPlayerId: number;
+  name: string;
+  position: Position;
+  headshot: string | null;
+}
+
+export async function getTeamRoster(teamAbbrev: string): Promise<NhlRosterPlayer[]> {
+  const res = await fetch(rosterUrl(teamAbbrev), { headers: { Accept: "application/json" } });
+  if (!res.ok) throw new Error(`NHL roster request failed for ${teamAbbrev} (${res.status})`);
+  const json = (await res.json()) as Record<string, unknown>;
+  const groups = ["forwards", "defensemen", "goalies"] as const;
+  const all = groups.flatMap((g) => (Array.isArray(json[g]) ? (json[g] as unknown[]) : []));
+  const parsed = z.array(RosterPlayerSchema).safeParse(all);
+  if (!parsed.success) {
+    throw new Error(`Unexpected response shape from NHL roster API for ${teamAbbrev}`);
+  }
+  return parsed.data.map((p) => ({
+    nhlPlayerId: p.id,
+    name: `${localizedName(p.firstName)} ${localizedName(p.lastName)}`,
+    position: mapNhlRosterPosition(p.positionCode),
+    headshot: p.headshot ?? null,
+  }));
+}
+
+/** For live debugging: the untouched parsed JSON body from a team's roster
+ * endpoint, no schema validation. */
+export async function getRawTeamRosterJson(teamAbbrev: string): Promise<unknown> {
+  const res = await fetch(rosterUrl(teamAbbrev), { headers: { Accept: "application/json" } });
+  if (!res.ok) throw new Error(`NHL roster request failed for ${teamAbbrev} (${res.status})`);
+  return res.json();
 }
 
 /** Runs `fn` over `items` with at most `concurrency` in flight at once. */

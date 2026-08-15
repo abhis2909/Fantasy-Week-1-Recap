@@ -193,6 +193,18 @@ with a key/ToS.
   bookkeeping, so it works even for weeks the commissioner never explicitly
   synced. This is what powers the individual player pages below; re-run it
   periodically (it's a full upsert, safe to repeat) to pick up new games.
+- **Full NHL player pool (free agents)**: pre-loads every player on all 32
+  current NHL rosters (`lib/nhl.ts`'s `getTeamRoster`, one API call per
+  team) as a `Player` row, ahead of actually needing them — so the full
+  pool is searchable on `/players` before a real add/drop or a future
+  Yahoo sync needs to find someone not already on a fantasy roster.
+  De-dupes against known players two ways: by NHL ID (already matched) and
+  by exact name (already on a fantasy roster but not yet NHL-matched) —
+  either way the existing `Player` row is updated in place, never
+  duplicated, so it's safe to re-run. **Unverified shape** (unlike
+  search/game-log, this one hasn't been confirmed against a live response
+  at all) — if every team errors out, use the **"Debug: preview a raw NHL
+  roster response"** box to see the real JSON and fix `getTeamRoster`.
 
 **Search endpoint shape is now verified against a live response**: it
 returns `playerId` as a numeric *string* (e.g. `"8478402"`), not a number —
@@ -209,6 +221,12 @@ likely symptom), use the **"Debug: preview a raw NHL search response"** or
 field-name list in `lib/nhl.ts`'s `aggregateSkaterStats`/
 `aggregateGoalieStats`/`mapSkaterGameEntry`/`mapGoalieGameEntry` is the one
 place to fix if the real names differ.
+
+**If a server action button gives an error right after a new deploy**: this
+is almost always a stale page — Next.js embeds a hashed ID for each server
+action, and a browser tab left open from before a deploy is holding IDs
+that no longer exist on the (now-redeployed) server. Hard-refresh the page
+and try again before assuming it's a real bug.
 
 ## Player pages & the 0–100 rating (`/players`)
 

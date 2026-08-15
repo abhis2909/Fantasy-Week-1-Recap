@@ -16,12 +16,20 @@ export default async function PlayersDirectoryPage() {
     orderBy: [{ team: { name: "asc" } }, { player: { fullName: "asc" } }],
   });
 
-  const searchEntries = rosterEntries.map((entry) => ({
-    id: entry.player.id,
-    fullName: entry.player.fullName,
-    primaryPosition: entry.player.primaryPosition,
-    teamName: entry.team.name,
-    avatarUrl: avatarForPlayer(entry.player),
+  // Search covers the whole known player pool — rostered players plus any
+  // free agents pre-loaded via "Import full NHL player pool" on the NHL
+  // Sync admin page — even though the grid below only shows this league's
+  // actual rosters.
+  const allPlayers = await prisma.player.findMany({
+    include: { rosterEntries: { where: { droppedAt: null }, include: { team: true } } },
+    orderBy: { fullName: "asc" },
+  });
+  const searchEntries = allPlayers.map((player) => ({
+    id: player.id,
+    fullName: player.fullName,
+    primaryPosition: player.primaryPosition,
+    teamName: player.rosterEntries[0]?.team.name ?? "Free Agent",
+    avatarUrl: avatarForPlayer(player),
   }));
 
   return (
