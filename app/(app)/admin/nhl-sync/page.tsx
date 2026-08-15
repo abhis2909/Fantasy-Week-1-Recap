@@ -234,35 +234,44 @@ export default async function NhlSyncPage({
     "use server";
     const name = (formData.get("debugSearchName") as string)?.trim();
     if (!name) return;
+    // NOTE: redirect() works by throwing internally — it must never be
+    // called inside this try, or its own throw gets caught below and
+    // reported as a fake "NEXT_REDIRECT" error. Compute the outcome first,
+    // then redirect exactly once after the try/catch.
+    let result: string | null = null;
+    let error: string | null = null;
     try {
       const raw = await getRawSearchJson(name);
-      const preview = JSON.stringify(raw, null, 2).slice(0, 4000);
-      redirect(`/admin/nhl-sync?${qs({ debugSearchName: name, debugSearchResult: preview })}`);
+      result = JSON.stringify(raw, null, 2).slice(0, 4000);
     } catch (err) {
-      redirect(
-        `/admin/nhl-sync?${qs({ debugSearchName: name, debugSearchError: err instanceof Error ? err.message : "Unknown error" })}`
-      );
+      error = err instanceof Error ? err.message : "Unknown error";
     }
+    redirect(
+      `/admin/nhl-sync?${qs(result !== null ? { debugSearchName: name, debugSearchResult: result } : { debugSearchName: name, debugSearchError: error! })}`
+    );
   }
 
   async function debugPreview(formData: FormData) {
     "use server";
     const name = (formData.get("debugName") as string)?.trim();
     if (!name) return;
+    let result: string | null = null;
+    let error: string | null = null;
     try {
       const match = await findBestNhlMatch(name);
       if (!match) {
-        redirect(`/admin/nhl-sync?${qs({ debugName: name, debugError: "No exact NHL name match found." })}`);
+        error = "No exact NHL name match found.";
+      } else {
+        const seasonId = `${season.year}${season.year + 1}`;
+        const raw = await getRawGameLogJson(match.nhlPlayerId, seasonId, NHL_GAME_TYPE_REGULAR_SEASON);
+        result = JSON.stringify(raw, null, 2).slice(0, 4000);
       }
-      const seasonId = `${season.year}${season.year + 1}`;
-      const raw = await getRawGameLogJson(match!.nhlPlayerId, seasonId, NHL_GAME_TYPE_REGULAR_SEASON);
-      const preview = JSON.stringify(raw, null, 2).slice(0, 4000);
-      redirect(`/admin/nhl-sync?${qs({ debugName: name, debugResult: preview })}`);
     } catch (err) {
-      redirect(
-        `/admin/nhl-sync?${qs({ debugName: name, debugError: err instanceof Error ? err.message : "Unknown error" })}`
-      );
+      error = err instanceof Error ? err.message : "Unknown error";
     }
+    redirect(
+      `/admin/nhl-sync?${qs(result !== null ? { debugName: name, debugResult: result } : { debugName: name, debugError: error! })}`
+    );
   }
 
   return (
