@@ -16,6 +16,8 @@
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient, Position, Role, TransactionDirection } from "../lib/generated/prisma/client";
 import { computeAndSaveMatchup } from "@/lib/matchups";
+import { hashPassword } from "@/lib/password";
+import crypto from "node:crypto";
 
 const connectionString = process.env.DATABASE_URL;
 if (!connectionString) {
@@ -181,11 +183,8 @@ async function main() {
   console.log("Wiping existing data...");
   // Order matters: children before parents. onDelete: Cascade handles most of
   // this already, but deleting League cascades everything below it, so this
-  // is really just "delete every league" plus the auth tables, which aren't
+  // is really just "delete every league" plus Users, which aren't
   // League-scoped.
-  await prisma.session.deleteMany();
-  await prisma.account.deleteMany();
-  await prisma.verificationToken.deleteMany();
   await prisma.transactionRating.deleteMany();
   await prisma.league.deleteMany();
   await prisma.user.deleteMany();
@@ -218,11 +217,25 @@ async function main() {
   });
 
   console.log("Creating managers and teams...");
+  // The commissioner's password comes from an env var so it's yours, not a
+  // shared default — set COMMISSIONER_PASSWORD in .env before seeding, or a
+  // random one-time password is generated and printed below. Every other
+  // (placeholder) manager gets a shared demo password: fine for a fixture
+  // league, not something to leave in place once real people replace them.
+  const DEMO_MANAGER_PASSWORD = "GoTeamGo2025!";
+  const commissionerPassword = process.env.COMMISSIONER_PASSWORD || crypto.randomBytes(9).toString("base64url");
+
   const teams: { id: string; name: string }[] = [];
   for (let i = 0; i < MANAGERS.length; i++) {
     const m = MANAGERS[i];
+    const plainPassword = m.role === "COMMISSIONER" ? commissionerPassword : DEMO_MANAGER_PASSWORD;
     const user = await prisma.user.create({
-      data: { name: m.name, email: m.email, role: m.role },
+      data: {
+        name: m.name,
+        email: m.email,
+        role: m.role,
+        passwordHash: await hashPassword(plainPassword),
+      },
     });
     const team = await prisma.team.create({
       data: { seasonId: season.id, managerId: user.id, name: TEAM_NAMES[i] },
@@ -452,9 +465,17 @@ async function main() {
   console.log(`League: ${league.name}`);
   console.log(`Season: ${season.year}, Week ${week1.number}`);
   console.log(`Teams: ${teams.length}`);
-  console.log(
-    `Sign in locally as the commissioner with: ${MANAGERS[0].email}`
-  );
+  console.log("");
+  console.log("Sign in as commissioner:");
+  console.log(`  email:    ${MANAGERS[0].email}`);
+  console.log(`  password: ${commissionerPassword}`);
+  if (!process.env.COMMISSIONER_PASSWORD) {
+    console.log(
+      "  (randomly generated — set COMMISSIONER_PASSWORD in .env and reseed to choose your own)"
+    );
+  }
+  console.log("");
+  console.log(`All other seeded managers share the password: ${DEMO_MANAGER_PASSWORD}`);
 }
 
 main()

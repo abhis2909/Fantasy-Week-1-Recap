@@ -1,47 +1,48 @@
 import NextAuth from "next-auth";
-import Resend from "next-auth/providers/resend";
-import { PrismaAdapter } from "@auth/prisma-adapter";
+import Credentials from "next-auth/providers/credentials";
 import { prisma } from "@/lib/prisma";
-
-// In local dev without a RESEND_API_KEY, sign-in links are printed to the
-// server console instead of actually emailed — the app is fully usable
-// without setting up a Resend account first.
-const resendApiKey = process.env.RESEND_API_KEY;
-const emailFrom = process.env.EMAIL_FROM || "Fantasy League <league@example.com>";
-
-const emailProvider = Resend({
-  apiKey: resendApiKey || "dev-mode-unused",
-  from: emailFrom,
-  ...(!resendApiKey && {
-    async sendVerificationRequest({
-      identifier,
-      url,
-    }: {
-      identifier: string;
-      url: string;
-    }) {
-      console.log(
-        `\n🔐 [dev] Fantasy League sign-in link for ${identifier}:\n${url}\n`
-      );
-    },
-  }),
-});
+import { verifyPassword } from "@/lib/password";
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
-  // @auth/prisma-adapter's published types target the default `@prisma/client`
-  // output; our schema generates a custom client (see prisma/schema.prisma)
-  // with an identical runtime shape, so this is a type-only mismatch, not a
-  // real one.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  adapter: PrismaAdapter(prisma as any),
-  providers: [emailProvider],
-  session: { strategy: "database" },
-  pages: { signIn: "/login", verifyRequest: "/login/check-email" },
+  // Credentials-based auth can't use database sessions (Auth.js requirement
+  // — there's no OAuth-style account record to hang a DB session off of),
+  // so this is JWT sessions. No adapter needed: authorize() below does its
+  // own Prisma lookup instead of going through one.
+  session: { strategy: "jwt" },
+  pages: { signIn: "/login" },
+  providers: [
+    Credentials({
+      credentials: {
+        email: { label: "Email", type: "email" },
+        password: { label: "Password", type: "password" },
+      },
+      async authorize(credentials) {
+        const email = typeof credentials?.email === "string" ? credentials.email.trim().toLowerCase() : null;
+        const password = typeof credentials?.password === "string" ? credentials.password : null;
+        if (!email || !password) return null;
+
+        const user = await prisma.user.findUnique({ where: { email } });
+        if (!user?.passwordHash) return null;
+
+        const valid = await verifyPassword(password, user.passwordHash);
+        if (!valid) return null;
+
+        return { id: user.id, email: user.email, name: user.name, role: user.role };
+      },
+    }),
+  ],
   callbacks: {
-    session({ session, user }) {
-      if (session.user) {
-        session.user.id = user.id;
-        session.user.role = (user as typeof user & { role: "COMMISSIONER" | "MEMBER" }).role;
+    jwt({ token, user }) {
+      if (user) {
+        token.id = user.id;
+        token.role = user.role;
+      }
+      return token;
+    },
+    session({ session, token }) {
+      if (typeof token.id === "string") session.user.id = token.id;
+      if (token.role === "COMMISSIONER" || token.role === "MEMBER") {
+        session.user.role = token.role;
       }
       return session;
     },

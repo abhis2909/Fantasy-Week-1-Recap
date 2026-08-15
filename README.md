@@ -6,7 +6,12 @@ statistical z-score, transaction tracking with 1–10 peer ratings, and a
 "hostile yet friendly" AI-narrated weekly recap newsletter.
 
 Built with Next.js (App Router, TypeScript), Prisma + Postgres, Auth.js
-(email magic links), and the Anthropic API for recap prose.
+(email + password), and the Anthropic API for recap prose.
+
+**Viewing the site is public** — standings, stats, Team of the Week,
+transactions, and published recaps are open to anyone with the link. Signing
+in is only required to submit a transaction rating (so it can be attributed
+to someone) or to reach `/admin` as the commissioner.
 
 ## Feature map
 
@@ -28,9 +33,10 @@ Built with Next.js (App Router, TypeScript), Prisma + Postgres, Auth.js
    ```
 
 2. **Configure environment.** Copy `.env.example` to `.env` and fill in at
-   least `DATABASE_URL` (a Postgres connection string) and `AUTH_SECRET`
-   (`npx auth secret`). `RESEND_API_KEY` and `ANTHROPIC_API_KEY` are optional
-   for local dev — see [Running without API keys](#running-without-api-keys).
+   least `DATABASE_URL` (a Postgres connection string), `AUTH_SECRET`
+   (`npx auth secret`), and `COMMISSIONER_PASSWORD` (whatever you want your
+   own password to be — the seed script hashes it in). `ANTHROPIC_API_KEY` is
+   optional — see [Running without API keys](#running-without-api-keys).
 
 3. **Set up the database**
 
@@ -42,10 +48,11 @@ Built with Next.js (App Router, TypeScript), Prisma + Postgres, Auth.js
    This creates a fixture league ("Slapshot City Fantasy Hockey League"),
    8 teams/managers, a full Week 1 (rosters, stats, matchups, a couple of
    transactions with ratings), engineered so every recap detector has
-   something to say. The seed script prints which email to sign in with as
-   the commissioner — by default the account belongs to whoever's email is
-   configured in `prisma/seed.ts` (`MANAGERS[0]`), which you should change to
-   your own before reseeding for real use.
+   something to say. The seed script prints the commissioner's email and
+   password to sign in with — by default that account belongs to whoever's
+   email is configured in `prisma/seed.ts` (`MANAGERS[0]`), which you should
+   change to your own before reseeding for real use. Every other seeded
+   manager shares one demo password, also printed by the script.
 
 4. **Run it**
 
@@ -53,22 +60,31 @@ Built with Next.js (App Router, TypeScript), Prisma + Postgres, Auth.js
    npm run dev
    ```
 
-   Visit `http://localhost:3000`, enter your email on the sign-in page, and
-   grab the magic link from the terminal (see below).
+   Visit `http://localhost:3000` — you'll land straight on the standings,
+   no sign-in needed. Use the credentials the seed script printed to sign in
+   as commissioner (top right → Sign in).
 
 ### Running without API keys
 
-The app is fully functional with an empty `.env` beyond `DATABASE_URL` and
-`AUTH_SECRET`:
+The app is fully functional with just `DATABASE_URL`, `AUTH_SECRET`, and
+`COMMISSIONER_PASSWORD` set:
 
-- **No `RESEND_API_KEY`**: sign-in links are printed to the dev server's
-  terminal instead of emailed. Copy the URL from the console into your
-  browser.
 - **No `ANTHROPIC_API_KEY`**: the weekly recap falls back to a deterministic
   template generator (`lib/recap/templateGenerator.ts`) instead of calling
   Claude. It covers every algorithmic section (tightest matchup, manager of
   the week, choker of the week, etc.) but skips the creative ones (Clutch,
   Clown, Quote of the Week), since those aren't derivable from stats alone.
+
+### A note on password login
+
+There's no email provider, no magic links, and no forgot-password flow yet —
+just email + password, checked with bcrypt against `User.passwordHash`. The
+login form uses standard `autocomplete="username"`/`"current-password"`
+attributes, so your browser will offer to save the password; on iPhone/Mac
+Safari that means **Face ID or Touch ID unlocks it for you** on future
+visits instead of typing it, without this app implementing any biometric
+API itself. There's currently no self-service way for a manager to set or
+change their own password — see the follow-ups below.
 
 ## Data model
 
@@ -159,11 +175,16 @@ mockup — generic placeholders, not real player likenesses.
 Built for Vercel + a hosted Postgres provider (Neon, Supabase, etc.):
 
 1. Provision a Postgres database and set `DATABASE_URL` in Vercel's env vars.
-2. Set `AUTH_SECRET`, `RESEND_API_KEY` + `EMAIL_FROM`, and
-   `ANTHROPIC_API_KEY` + `ANTHROPIC_MODEL` as needed.
-3. Run `npx prisma migrate deploy` against the production database (either
-   locally with `DATABASE_URL` pointed at prod, or as a Vercel build step).
-4. If you want the recap draft to auto-generate weekly, wire a Vercel Cron
+2. Set `AUTH_SECRET`, `AUTH_TRUST_HOST=true`, and optionally
+   `ANTHROPIC_API_KEY` + `ANTHROPIC_MODEL`.
+3. Migrations run automatically on every deploy — the `vercel-build` script
+   runs `prisma migrate deploy` before `next build`, so there's no separate
+   manual migration step against the production database.
+4. Seed the production database once (from your own machine, with
+   `DATABASE_URL` pointed at prod): `COMMISSIONER_PASSWORD=... npx prisma db
+   seed`. Or skip the fixture entirely and use the (upcoming) admin "add
+   manager" flow to create real accounts from scratch — see follow-ups.
+5. If you want the recap draft to auto-generate weekly, wire a Vercel Cron
    job to call a small authenticated route that runs
    `generateRecapDraft(weekId)` — this repo doesn't include that route yet
    since publishing still requires a commissioner's review either way.
@@ -187,6 +208,14 @@ Built for Vercel + a hosted Postgres provider (Neon, Supabase, etc.):
 - The per-category weights used for Team of the Week / Manager of the Week /
   Choker of the Week (`lib/scoring/weeklyScore.ts`) are a reasonable default
   "points league" conversion, not yet league-configurable.
+- **No admin UI for managing users yet.** Adding a manager, or setting/
+  changing anyone's password, currently means editing `prisma/seed.ts` and
+  re-running the seed — which wipes and rebuilds the whole league. An
+  "add manager" / "reset password" admin page is the natural next addition
+  before onboarding a real league.
+- **No forgot-password flow.** If someone forgets their password, the
+  commissioner has to reset it manually (currently: via the database) until
+  the admin page above exists.
 
 ### Future: Yahoo Fantasy API integration
 

@@ -1,4 +1,3 @@
-import { redirect } from "next/navigation";
 import Link from "next/link";
 import { auth, signOut } from "@/lib/auth";
 
@@ -12,7 +11,7 @@ const NAV_LINKS = [
 
 async function doSignOut() {
   "use server";
-  await signOut({ redirectTo: "/login" });
+  await signOut({ redirectTo: "/standings" });
 }
 
 export default async function AppLayout({
@@ -20,8 +19,11 @@ export default async function AppLayout({
 }: {
   children: React.ReactNode;
 }) {
+  // Viewing the league site is public — no sign-in wall. A session is only
+  // needed to submit transaction ratings and to reach /admin (both of those
+  // routes/components check auth() themselves), so this layout renders the
+  // same shell either way and just adapts the nav.
   const session = await auth();
-  if (!session) redirect("/login");
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -36,18 +38,24 @@ export default async function AppLayout({
                 {link.label}
               </Link>
             ))}
-            {session.user.role === "COMMISSIONER" && (
+            {session?.user.role === "COMMISSIONER" && (
               <Link href="/admin" className="text-red hover:opacity-80">
                 Admin
               </Link>
             )}
           </nav>
-          <form action={doSignOut} className="flex items-center gap-3">
-            <span className="text-sm text-neutral-500">{session.user.name}</span>
-            <button type="submit" className="text-sm font-medium text-neutral-500 hover:text-red">
-              Sign out
-            </button>
-          </form>
+          {session ? (
+            <form action={doSignOut} className="flex items-center gap-3">
+              <span className="text-sm text-neutral-500">{session.user.name}</span>
+              <button type="submit" className="text-sm font-medium text-neutral-500 hover:text-red">
+                Sign out
+              </button>
+            </form>
+          ) : (
+            <Link href="/login" className="text-sm font-medium text-neutral-500 hover:text-red">
+              Sign in
+            </Link>
+          )}
         </div>
       </header>
       <main className="flex-1">{children}</main>

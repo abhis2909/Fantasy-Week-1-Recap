@@ -7,4 +7,7 @@ declare module "next-auth" {
       role: "COMMISSIONER" | "MEMBER";
     } & DefaultSession["user"];
   }
+  interface User {
+    role?: "COMMISSIONER" | "MEMBER";
+  }
 }
