@@ -275,6 +275,20 @@ means fewer games got the hits/blocks enrichment on that run; re-running
 picks up where it left off (already-cached boxscores just get re-fetched,
 nothing is lost).
 
+**The NHL API has an undocumented rate limit** — confirmed live: a
+full-roster action run at concurrency 6 got every single request 429'd.
+Every request in `lib/nhl.ts` goes through a shared `fetchNhl` wrapper that
+retries a 429 (or a 5xx) with exponential backoff — honoring a Retry-After
+header if the API sends one — before giving up; a real 404 or other 4xx is
+never retried, since that's an actual answer (e.g. "no game log for this
+player this season"), not a transient failure. "Update season card scores"
+also runs at a lower concurrency (3, vs. 6 elsewhere on this page) since it
+can fire up to two requests per player. If a run still comes back with a
+wall of 429 errors despite this, the rate limit is probably tighter than
+what's tuned here — dropping the concurrency argument further (or the
+retry backoff's cap) in the relevant `mapWithConcurrency` call is the
+place to start.
+
 Goalie stats (Wins/GAA/SV%/Shutouts) are unaffected by any of this — those
 come entirely from the game-log endpoint's own fields
 (`mapGoalieGameEntry`), no boxscore needed.

@@ -12,6 +12,37 @@ import type { Position } from "@/lib/generated/prisma/client";
 const SEARCH_URL = "https://search.d3.nhle.com/api/v1/search/player";
 const landingUrl = (id: number) => `https://api-web.nhle.com/v1/player/${id}/landing`;
 
+/**
+ * fetch wrapper with retry-on-429/5xx for the NHL API specifically. It has
+ * an undocumented rate limit — confirmed live: a full-roster admin action
+ * (multiple requests per player, run at concurrency) can get every single
+ * request 429'd once the burst is big enough, failing the whole run rather
+ * than just slowing it down. 404 and other 4xx responses are NOT retried —
+ * those are real answers (e.g. "no game log for this player this season"),
+ * not a transient failure, and retrying them would just waste the retry
+ * budget. Honors a Retry-After header if the API sends one; otherwise backs
+ * off exponentially with a little jitter so a batch of concurrent requests
+ * that all got rate-limited together don't all retry in lockstep and
+ * immediately re-trigger the same limit.
+ */
+async function fetchNhl(url: string, init?: RequestInit, maxAttempts = 5): Promise<Response> {
+  let lastRes: Response | null = null;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const res = await fetch(url, init);
+    if (res.ok) return res;
+    if (res.status !== 429 && res.status < 500) return res;
+    lastRes = res;
+    if (attempt === maxAttempts) break;
+    const retryAfterHeader = res.headers.get("retry-after");
+    const retryAfterMs = retryAfterHeader ? Number(retryAfterHeader) * 1000 : NaN;
+    const backoffMs = Number.isFinite(retryAfterMs)
+      ? retryAfterMs
+      : Math.min(8000, 400 * 2 ** (attempt - 1)) + Math.random() * 250;
+    await new Promise((resolve) => setTimeout(resolve, backoffMs));
+  }
+  return lastRes!;
+}
+
 const SearchMatchSchema = z
   .object({
     // Confirmed live: this endpoint returns playerId as a numeric *string*
@@ -37,7 +68,7 @@ function searchUrl(query: string): string {
 }
 
 export async function searchNhlPlayers(query: string): Promise<NhlSearchMatch[]> {
-  const res = await fetch(searchUrl(query), { headers: { Accept: "application/json" } });
+  const res = await fetchNhl(searchUrl(query), { headers: { Accept: "application/json" } });
   if (!res.ok) throw new Error(`NHL search request failed (${res.status})`);
   const json = await res.json();
   const parsed = z.array(SearchMatchSchema).safeParse(json);
@@ -54,7 +85,7 @@ export async function searchNhlPlayers(query: string): Promise<NhlSearchMatch[]>
  * endpoint, no schema validation — lets us see the real shape when
  * searchNhlPlayers's zod parse rejects it. */
 export async function getRawSearchJson(query: string): Promise<unknown> {
-  const res = await fetch(searchUrl(query), { headers: { Accept: "application/json" } });
+  const res = await fetchNhl(searchUrl(query), { headers: { Accept: "application/json" } });
   if (!res.ok) throw new Error(`NHL search request failed (${res.status})`);
   return res.json();
 }
@@ -62,7 +93,7 @@ export async function getRawSearchJson(query: string): Promise<unknown> {
 const LandingSchema = z.object({ headshot: z.string().optional() }).passthrough();
 
 export async function getNhlHeadshotUrl(nhlPlayerId: number): Promise<string | null> {
-  const res = await fetch(landingUrl(nhlPlayerId), { headers: { Accept: "application/json" } });
+  const res = await fetchNhl(landingUrl(nhlPlayerId), { headers: { Accept: "application/json" } });
   if (!res.ok) return null;
   const json = await res.json();
   const parsed = LandingSchema.safeParse(json);
@@ -123,7 +154,7 @@ export async function getPlayerGameLog(
   seasonId: string,
   gameType: number = NHL_GAME_TYPE_REGULAR_SEASON
 ): Promise<RawGameLogEntry[]> {
-  const res = await fetch(gameLogUrl(nhlPlayerId, seasonId, gameType), {
+  const res = await fetchNhl(gameLogUrl(nhlPlayerId, seasonId, gameType), {
     headers: { Accept: "application/json" },
   });
   if (!res.ok) throw new Error(`NHL game log request failed (${res.status})`);
@@ -149,7 +180,7 @@ export async function getRawGameLogJson(
   seasonId: string,
   gameType: number = NHL_GAME_TYPE_REGULAR_SEASON
 ): Promise<unknown> {
-  const res = await fetch(gameLogUrl(nhlPlayerId, seasonId, gameType), {
+  const res = await fetchNhl(gameLogUrl(nhlPlayerId, seasonId, gameType), {
     headers: { Accept: "application/json" },
   });
   if (!res.ok) throw new Error(`NHL game log request failed (${res.status})`);
@@ -331,7 +362,7 @@ function extractBoxscoreSkaters(json: Record<string, unknown>): unknown[] {
 
 /** Every skater's hits/blockedShots for one game, keyed by NHL player ID. */
 export async function getGameHitsAndBlocks(gameId: number): Promise<Map<number, GameHitsBlocks>> {
-  const res = await fetch(boxscoreUrl(gameId), { headers: { Accept: "application/json" } });
+  const res = await fetchNhl(boxscoreUrl(gameId), { headers: { Accept: "application/json" } });
   if (!res.ok) throw new Error(`NHL boxscore request failed for game ${gameId} (${res.status})`);
   const json = (await res.json()) as Record<string, unknown>;
   const skaters = extractBoxscoreSkaters(json);
@@ -349,7 +380,7 @@ export async function getGameHitsAndBlocks(gameId: number): Promise<Map<number, 
 /** For live debugging: the untouched parsed JSON body from a game's
  * boxscore endpoint, no schema validation. */
 export async function getRawBoxscoreJson(gameId: number): Promise<unknown> {
-  const res = await fetch(boxscoreUrl(gameId), { headers: { Accept: "application/json" } });
+  const res = await fetchNhl(boxscoreUrl(gameId), { headers: { Accept: "application/json" } });
   if (!res.ok) throw new Error(`NHL boxscore request failed for game ${gameId} (${res.status})`);
   return res.json();
 }
@@ -415,7 +446,7 @@ export interface NhlRosterPlayer {
 }
 
 export async function getTeamRoster(teamAbbrev: string): Promise<NhlRosterPlayer[]> {
-  const res = await fetch(rosterUrl(teamAbbrev), { headers: { Accept: "application/json" } });
+  const res = await fetchNhl(rosterUrl(teamAbbrev), { headers: { Accept: "application/json" } });
   if (!res.ok) throw new Error(`NHL roster request failed for ${teamAbbrev} (${res.status})`);
   const json = (await res.json()) as Record<string, unknown>;
   const groups = ["forwards", "defensemen", "goalies"] as const;
@@ -435,7 +466,7 @@ export async function getTeamRoster(teamAbbrev: string): Promise<NhlRosterPlayer
 /** For live debugging: the untouched parsed JSON body from a team's roster
  * endpoint, no schema validation. */
 export async function getRawTeamRosterJson(teamAbbrev: string): Promise<unknown> {
-  const res = await fetch(rosterUrl(teamAbbrev), { headers: { Accept: "application/json" } });
+  const res = await fetchNhl(rosterUrl(teamAbbrev), { headers: { Accept: "application/json" } });
   if (!res.ok) throw new Error(`NHL roster request failed for ${teamAbbrev} (${res.status})`);
   return res.json();
 }

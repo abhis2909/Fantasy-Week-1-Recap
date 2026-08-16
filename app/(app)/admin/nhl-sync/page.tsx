@@ -375,7 +375,15 @@ export default async function NhlSyncPage({
     const skipped: string[] = [];
     const errored: string[] = [];
 
-    await mapWithConcurrency(activeRoster, 6, async (entry) => {
+    // Lower concurrency than the other sync actions on this page (3 vs 6)
+    // — this one can fire up to two NHL requests per player (a search match
+    // for anyone not yet NHL-linked, plus the last-season game log for
+    // everyone), the most of any action here, and a full-roster run at
+    // concurrency 6 was enough burst traffic to get every single request
+    // 429'd. lib/nhl.ts's fetchNhl already retries 429s with backoff, but
+    // that's a second line of defense — better to not lean on it this hard
+    // in the first place.
+    await mapWithConcurrency(activeRoster, 3, async (entry) => {
       const player = entry.player;
       try {
         let nhlId = player.externalId ? Number(player.externalId) : null;
