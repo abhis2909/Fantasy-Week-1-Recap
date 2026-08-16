@@ -275,34 +275,47 @@ game, so a partial timeout just means fewer games got the hits/blocks
 enrichment on that run; re-running picks up where it left off
 (already-cached boxscores just get re-fetched, nothing is lost).
 
-**"Sync full season game logs" shows live progress, not just a spinner.**
-A plain server-action button blocks with zero feedback until the whole
-sync finishes — for something that can take minutes, that just looks like
-the page froze. The primary button now:
+**"Sync full season game logs" shows live progress, not just a spinner —
+and does the work in small chunks, not one long request.** A plain
+server-action button blocks with zero feedback until the whole sync
+finishes — for something that can take minutes, that just looks like the
+page froze. The first fix tried was a background job (Next's `after()`,
+meant to keep a serverless function alive past its response) polled via a
+status endpoint; in production that was found to just silently stop
+partway through, almost certainly a platform duration cap lower than what
+`after()`-scheduled work actually gets to run with — so it's not what's
+here now. Instead:
 
-1. `POST /api/admin/sync-game-logs` starts a `SyncProgress` row (one
-   `total`/`completed`/`status` row per sync type, `lib/syncProgress.ts`)
-   and responds immediately — the actual sync runs after the response via
-   Next's `after()`, which keeps the serverless function alive up to
-   `maxDuration` without blocking the request that triggered it.
-2. `components/admin/SyncGameLogsProgress.tsx` (client component) polls
-   `GET /api/admin/sync-progress?key=...` every ~1.2s and renders a real
-   progress bar — `completed`/`total` players processed, incremented once
-   per player (matched, skipped, or errored alike) by the shared sync
-   logic in `lib/syncJobs.ts`.
-3. Once `status` flips to `done`/`error`, the client shows the final
-   summary and calls `router.refresh()` so the rest of the page (game log
-   count, etc.) picks up the new data.
+1. `components/admin/SyncGameLogsProgress.tsx` (client component) POSTs to
+   `/api/admin/sync-game-logs` with `{ offset: 0 }`, gets back a small
+   batch's worth of results (`BATCH_SIZE = 5` players' worth of NHL
+   requests, comfortably inside any platform's duration limit — see the
+   route's doc comment), and immediately POSTs again with the next offset.
+   It keeps looping — updating the progress bar after every response —
+   until a response comes back `done: true`.
+2. Each request is a plain, synchronous request/response — nothing that
+   depends on surviving past when the response was sent, so there's no
+   background state that can silently die and leave the bar stuck. The
+   per-player work itself (`lib/syncJobs.ts`'s `syncOnePlayerGameLog`,
+   shared between the batch route and a whole-roster convenience wrapper)
+   didn't change at all — this is purely about *how many players get
+   processed per request*, not what happens to each one.
+3. `SyncProgress` (`lib/syncProgress.ts`, one `total`/`completed`/`status`
+   row per sync type) still gets updated as each batch completes, mainly
+   for durability/observability (e.g. `GET /api/admin/sync-progress?key=…`
+   for a manual check) — the client's own accumulated state from each
+   response is what actually drives the progress bar and final summary,
+   though, not a separate poll.
 
-The sync logic itself (`runFullSeasonGameLogSync`) is shared between this
-route and a plain server-action fallback still on the page (behind a
-"progress bar not working?" disclosure) — same "boring but always works,
-no live feedback" reasoning as `/api/admin/cleanup-fictional-names`
-elsewhere on this page, for when `fetch`/JS is somehow unavailable. Only
-"Sync full season game logs" got this treatment so far, as the one
-actually reported freezing — the other sync buttons on this page could get
-the same pattern later if needed, reusing `lib/syncProgress.ts` with a new
-key.
+The sync logic itself is shared between the chunked route and a plain
+whole-roster server-action fallback still on the page (behind a "progress
+bar not working?" disclosure) — same "boring but always works, no live
+feedback, and yes it can time out on a big roster" reasoning as
+`/api/admin/cleanup-fictional-names` elsewhere on this page, for when
+`fetch`/JS is somehow unavailable. Only "Sync full season game logs" got
+this treatment so far, as the one actually reported freezing — the other
+sync buttons on this page could get the same chunking pattern later if
+needed.
 
 **The NHL API has an undocumented rate limit** — confirmed live: a
 full-roster action run at concurrency 6 got every single request 429'd.
@@ -403,6 +416,15 @@ safe any time). This is intentionally not a per-game number:
   (`Player.nhlTeamAbbrev`, hand-maintained in `lib/nhlTeamColors.ts`) —
   populated by the same NHL sync matching that finds photos, falling back
   to the site's own navy/gold when there's no team match yet.
+- **Category tiles show a short attribute-style label** (SHO, PAS, PP,
+  PK, VOL, PHY, DEF, GRIT for skaters; WIN, CALM, STOP, LOCK for goalies —
+  `CATEGORY_ATTRIBUTE_LABEL` in `components/players/SeasonCard.tsx`),
+  HUT/FUT-style, rather than the raw scoring-category code (G, A, GAA,
+  …) — those exact codes are correct and meaningful everywhere else on
+  the site (Standings, "Season totals"), just cryptic as a glance-able
+  label on a small card tile. The real name still shows on hover
+  (`CATEGORY_NAMES`), and the player detail page has a caption spelling
+  out that the card uses its own labels.
 
 Until "Update season card scores" has run for a player, their card shows
 "–" in place of every score rather than a fabricated number.

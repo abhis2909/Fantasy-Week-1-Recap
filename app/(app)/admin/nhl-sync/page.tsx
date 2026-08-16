@@ -27,7 +27,6 @@ import {
 import { isLegacyFictionalName } from "@/lib/depthPlayerNames";
 import { renameLegacyFictionalPlayers } from "@/lib/playerCleanup";
 import { runFullSeasonGameLogSync } from "@/lib/syncJobs";
-import { FULL_SEASON_SYNC_PROGRESS_KEY } from "@/lib/syncProgress";
 import { SyncGameLogsProgress } from "@/components/admin/SyncGameLogsProgress";
 import {
   sumGameLogValues,
@@ -260,8 +259,8 @@ export default async function NhlSyncPage({
    * /api/admin/cleanup-fictional-names: blocks until the whole sync
    * finishes with zero progress feedback, but doesn't depend on fetch/JS
    * working right. The primary path is SyncGameLogsProgress below, which
-   * calls the same runFullSeasonGameLogSync through
-   * POST /api/admin/sync-game-logs and polls for live progress instead.
+   * drives the same per-player logic in small chunks through repeated
+   * calls to POST /api/admin/sync-game-logs instead of one long request.
    */
   async function syncGameLogs() {
     "use server";
@@ -672,7 +671,10 @@ export default async function NhlSyncPage({
           {gameLogCount} game{gameLogCount === 1 ? "" : "s"} stored across all players. Powers
           the per-player pages (<code className="text-gold">/players</code>) — season totals,
           last 10 games, and a 0-100 rating for each game via the fixed-weight valuation model
-          (<code className="text-gold">lib/playerRating.ts</code>).
+          (<code className="text-gold">lib/playerRating.ts</code>). The progress bar&apos;s player
+          count below is the <em>active roster</em> (rostered, not dropped) — not the same number
+          as the full known player pool shown further down this page, which also includes free
+          agents.
         </p>
         <p className="mb-4 text-cream/80">
           Hits and Blocked Shots come from a second, per-<em>game</em> boxscore request (the
@@ -682,7 +684,7 @@ export default async function NhlSyncPage({
           so this can take a few minutes on a fresh run — the progress bar below tracks it live
           rather than leaving the page looking frozen until it&apos;s done.
         </p>
-        <SyncGameLogsProgress progressKey={FULL_SEASON_SYNC_PROGRESS_KEY} />
+        <SyncGameLogsProgress />
         <details className="mt-4">
           <summary className="cursor-pointer text-xs tracking-wide text-cream/50 uppercase">
             Progress bar not working? Use the plain fallback

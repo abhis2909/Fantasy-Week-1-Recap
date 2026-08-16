@@ -78,7 +78,9 @@ export default async function PlayerDetailPage({
                 <p className="mt-2 text-center text-[11px] text-cream/50">
                   0–100 rating per category — {Math.round(player.seasonRating.currentSeasonWeight * 100)}%
                   this season, {Math.round((1 - player.seasonRating.currentSeasonWeight) * 100)}% last.
-                  Not the same scale as the totals to the right.
+                  Not the same scale as the totals to the right, and labeled as card attributes (e.g.
+                  &quot;SHO&quot; for Goals) rather than the raw stat codes — hover a tile for the real
+                  name.
                 </p>
                 <p
                   className={`mt-1 text-center text-[11px] ${
@@ -122,37 +124,36 @@ export default async function PlayerDetailPage({
                 ))}
               </div>
             )}
+
+            <p className="mt-5 mb-2 text-xs tracking-wide text-cream/50 uppercase">Last 10 games</p>
+            {last10.length === 0 ? (
+              <p className="text-cream/70">No game logs synced yet for this player.</p>
+            ) : (
+              <div className="flex flex-col gap-2">
+                {last10.map((g) => (
+                  <div
+                    key={g.gameDate.toISOString()}
+                    className="flex items-center justify-between rounded-lg bg-white/5 px-4 py-2.5"
+                  >
+                    <div>
+                      <p className="text-sm font-medium text-white">
+                        {g.gameDate.toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+                        {g.opponent ? ` vs ${g.opponent}` : ""}
+                      </p>
+                      <p className="text-xs text-cream/60">
+                        {shortStatSummary(player.primaryPosition, g.values)}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <div className="font-heading text-lg text-gold">{g.rating}</div>
+                      <div className="text-[10px] tracking-wide text-cream/50 uppercase">/ 100</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
-      </SectionCard>
-
-      <SectionCard title="Last 10 games">
-        {last10.length === 0 ? (
-          <p className="text-cream/80">No game logs synced yet for this player.</p>
-        ) : (
-          <div className="flex flex-col gap-2">
-            {last10.map((g) => (
-              <div
-                key={g.gameDate.toISOString()}
-                className="flex items-center justify-between rounded-lg bg-white/5 px-4 py-2.5"
-              >
-                <div>
-                  <p className="text-sm font-medium text-white">
-                    {g.gameDate.toLocaleDateString(undefined, { month: "short", day: "numeric" })}
-                    {g.opponent ? ` vs ${g.opponent}` : ""}
-                  </p>
-                  <p className="text-xs text-cream/60">
-                    {shortStatSummary(player.primaryPosition, g.values)}
-                  </p>
-                </div>
-                <div className="text-right">
-                  <div className="font-heading text-lg text-gold">{g.rating}</div>
-                  <div className="text-[10px] tracking-wide text-cream/50 uppercase">/ 100</div>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
       </SectionCard>
     </>
   );

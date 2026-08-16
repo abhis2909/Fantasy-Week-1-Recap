@@ -1,88 +1,117 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 
-/** Matches lib/syncProgress.ts's SyncProgressState — duplicated rather than
- * imported since that file pulls in Prisma (server-only) and this is a
- * client component. */
-interface ProgressState {
+interface ChunkResponse {
+  done: boolean;
   total: number;
   completed: number;
-  status: "running" | "done" | "error" | "not_started";
-  message: string | null;
+  nextOffset: number;
+  matched: number;
+  upserted: number;
+  skipped: string[];
+  errored: string[];
 }
 
-const POLL_MS = 1200;
+type UiState =
+  | { status: "idle" }
+  | { status: "running"; total: number; completed: number }
+  | {
+      status: "done" | "error";
+      total: number;
+      completed: number;
+      matched: number;
+      upserted: number;
+      skipped: string[];
+      errored: string[];
+      failureMessage?: string;
+    };
 
 /**
- * Replaces a plain "click and wait with zero feedback" server-action button
- * for "Sync full season game logs" — a real progress bar backed by
- * SyncProgress (lib/syncProgress.ts), polled while the sync runs in the
- * background via /api/admin/sync-game-logs (POST to start) and
- * /api/admin/sync-progress (GET to poll). A plain server-action fallback
- * button still exists below this one for when JS/fetch is somehow
- * unavailable — same "boring but always works" reasoning as
- * /api/admin/cleanup-fictional-names elsewhere on this page.
+ * Drives "Sync full season game logs" as a client-side loop of small
+ * chunked requests (POST /api/admin/sync-game-logs, one batch of players
+ * per call) instead of a single request that either blocks with zero
+ * feedback (the original server action) or hands the work to a background
+ * job that isn't guaranteed to survive an unknown duration budget (the
+ * first version of this component, found in production to just get stuck
+ * partway through — see the API route's doc comment for the full
+ * reasoning). Each fetch here is fast and self-contained, so progress is
+ * exactly as current as the last completed chunk, and there's no
+ * background state to silently die and leave the bar stuck.
  */
-export function SyncGameLogsProgress({ progressKey }: { progressKey: string }) {
+export function SyncGameLogsProgress() {
   const router = useRouter();
-  const [progress, setProgress] = useState<ProgressState | null>(null);
-  const [starting, setStarting] = useState(false);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  function stopPolling() {
-    if (pollRef.current) {
-      clearInterval(pollRef.current);
-      pollRef.current = null;
-    }
-  }
-
-  async function poll() {
-    const res = await fetch(`/api/admin/sync-progress?key=${encodeURIComponent(progressKey)}`);
-    if (!res.ok) return;
-    const data: ProgressState = await res.json();
-    setProgress(data);
-    if (data.status === "done" || data.status === "error") {
-      stopPolling();
-      router.refresh();
-    }
-  }
+  const [state, setState] = useState<UiState>({ status: "idle" });
 
   async function start() {
-    setStarting(true);
+    let offset = 0;
+    let total = 0;
+    let completed = 0;
+    let matched = 0;
+    let upserted = 0;
+    const skipped: string[] = [];
+    const errored: string[] = [];
+
+    setState({ status: "running", total: 0, completed: 0 });
+
     try {
-      const res = await fetch("/api/admin/sync-game-logs", { method: "POST" });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        setProgress({ total: 0, completed: 0, status: "error", message: body.error ?? "Failed to start." });
-        return;
+      for (;;) {
+        const res = await fetch("/api/admin/sync-game-logs", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ offset }),
+        });
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          throw new Error(body.error ?? `Request failed (${res.status})`);
+        }
+        const chunk: ChunkResponse = await res.json();
+        total = chunk.total;
+        completed = chunk.completed;
+        matched += chunk.matched;
+        upserted += chunk.upserted;
+        skipped.push(...chunk.skipped);
+        errored.push(...chunk.errored);
+        setState({ status: "running", total: chunk.total, completed: chunk.completed });
+
+        if (chunk.done) {
+          setState({ status: "done", total, completed, matched, upserted, skipped, errored });
+          router.refresh();
+          return;
+        }
+        if (chunk.total === 0) break; // empty roster — nothing to do
+        offset = chunk.nextOffset;
       }
-      await poll();
-      pollRef.current = setInterval(poll, POLL_MS);
-    } finally {
-      setStarting(false);
+    } catch (err) {
+      setState({
+        status: "error",
+        total,
+        completed,
+        matched,
+        upserted,
+        skipped,
+        errored,
+        failureMessage: err instanceof Error ? err.message : "Sync failed for an unknown reason.",
+      });
     }
   }
 
-  // Stop polling if the component unmounts mid-sync (navigating away).
-  useEffect(() => () => stopPolling(), []);
-
-  const running = progress?.status === "running";
-  const pct = progress && progress.total > 0 ? Math.round((progress.completed / progress.total) * 100) : 0;
+  const running = state.status === "running";
+  const pct = running && state.total > 0 ? Math.round((state.completed / state.total) * 100) : 0;
 
   return (
     <div>
       <button
         type="button"
         onClick={start}
-        disabled={starting || running}
+        disabled={running}
         className="rounded-lg bg-gold px-4 py-2 text-sm font-semibold text-navy-deep transition hover:bg-gold-bright disabled:cursor-not-allowed disabled:opacity-60"
       >
         {running ? "Syncing…" : "Sync full season game logs"}
       </button>
 
-      {progress && (progress.status === "running" || progress.status === "done" || progress.status === "error") && (
+      {state.status !== "idle" && (
         <div className="mt-3 max-w-md">
           {running && (
             <>
@@ -93,15 +122,30 @@ export function SyncGameLogsProgress({ progressKey }: { progressKey: string }) {
                 />
               </div>
               <p className="mt-1.5 text-xs text-cream/60">
-                {progress.completed} of {progress.total} players — {pct}%
+                {state.completed} of {state.total} players — {pct}%
               </p>
             </>
           )}
-          {progress.status === "done" && (
-            <p className="text-sm text-gold">Sync complete — {progress.message}</p>
+          {state.status === "done" && (
+            <p className="text-sm text-gold">
+              Sync complete — {state.matched} player{state.matched === 1 ? "" : "s"} synced,{" "}
+              {state.upserted} game{state.upserted === 1 ? "" : "s"} upserted
+              {state.skipped.length > 0 ? `, ${state.skipped.length} skipped` : ""}
+              {state.errored.length > 0 ? `, ${state.errored.length} errored` : ""}.
+              {state.skipped.length > 0 && (
+                <span className="mt-1 block text-cream/70">No exact match: {state.skipped.join(", ")}</span>
+              )}
+              {state.errored.length > 0 && (
+                <span className="mt-1 block text-danger">Errors: {state.errored.join(", ")}</span>
+              )}
+            </p>
           )}
-          {progress.status === "error" && (
-            <p className="text-sm text-danger">Sync failed — {progress.message}</p>
+          {state.status === "error" && (
+            <p className="text-sm text-danger">
+              Sync stopped after {state.completed} of {state.total} players — {state.failureMessage}. Safe to
+              click the button again — it starts over from the top, but re-syncing an already-synced player
+              just upserts the same data, nothing breaks.
+            </p>
           )}
         </div>
       )}

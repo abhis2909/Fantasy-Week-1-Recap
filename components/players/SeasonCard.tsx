@@ -20,6 +20,28 @@ const CATEGORY_NAMES: Record<string, string> = {
   SO: "Shutouts",
 };
 
+/** The short attribute-style label shown on the card itself, HUT/FUT-style
+ * (think PAC/SHO/PAS/DRI/DEF/PHY) rather than the raw scoring-category
+ * code — "G"/"A"/"PPP" read as cryptic letters to glance at on a card,
+ * even though those exact codes are correct and meaningful elsewhere on
+ * the site (Standings, "Season totals"). The full real name still shows
+ * on hover (CATEGORY_NAMES above), so the mapping back to the actual stat
+ * is never hidden, just not the primary label here. */
+const CATEGORY_ATTRIBUTE_LABEL: Record<string, string> = {
+  G: "SHO", // Shooting
+  A: "PAS", // Passing
+  PPP: "PP", // Power Play
+  SHP: "PK", // Penalty Kill
+  SOG: "VOL", // Volume
+  HIT: "PHY", // Physicality
+  BLK: "DEF", // Defense
+  PIM: "GRIT",
+  W: "WIN",
+  GAA: "CALM", // Composure
+  "SV%": "STOP", // Reflexes
+  SO: "LOCK", // Lockdown
+};
+
 /** HUT/FUT-style flavor label from the overall score — purely cosmetic,
  * doesn't feed back into any rating math. */
 function tierLabel(overall: number | null): string | null {
@@ -142,11 +164,13 @@ export function SeasonCard({
         {codes.map((code) => (
           <div
             key={code}
-            title={CATEGORY_NAMES[code] ?? code}
+            title={`${CATEGORY_ATTRIBUTE_LABEL[code] ?? code} — ${CATEGORY_NAMES[code] ?? code}`}
             className="flex flex-col items-center rounded-md bg-black/20 py-1.5"
           >
             <span className="font-heading text-sm font-bold text-white">{categoryScores?.[code] ?? "–"}</span>
-            <span className="text-[9px] font-medium tracking-wide text-white/60 uppercase">{code}</span>
+            <span className="text-[9px] font-medium tracking-wide text-white/60 uppercase">
+              {CATEGORY_ATTRIBUTE_LABEL[code] ?? code}
+            </span>
           </div>
         ))}
       </div>
