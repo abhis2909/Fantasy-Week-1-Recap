@@ -15,8 +15,8 @@ const CATEGORY_NAMES: Record<string, string> = {
   BLK: "Blocked shots",
   PIM: "Penalty minutes",
   W: "Wins",
-  SV: "Saves",
-  GA: "Goals against",
+  GAA: "Goals against average",
+  "SV%": "Save percentage",
   SO: "Shutouts",
 };
 

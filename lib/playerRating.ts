@@ -213,12 +213,24 @@ const DEFENSE_CATEGORY_CALIBRATION: Record<string, CategoryCalibration> = {
   PIM: { baseline: 0.45, stdDev: 0.4, higherIsBetter: true },
 };
 
+// Uses the league's own goalie categories (W, GAA, SV%, SO) — the same
+// codes shown on Standings and in the "Season totals" panel — rather than
+// the raw SV/GA counts the per-game rating formula uses internally
+// (lib/nhl.ts's mapGoalieGameEntry stores both per game; SV/GA make more
+// sense there since ratingForValues needs counts, not rates). The card is
+// user-facing, so it should read the same as everywhere else a goalie's
+// stats show up — showing SV/GA there instead made the card look
+// disconnected from the actual season totals right below it. GAA's
+// baseline/stdDev carry over unchanged from the old GA entry — same
+// underlying per-game goals-against value, just labeled as the rate stat
+// it actually is once summed and divided by games played (same convention
+// seasonTotalsForPlayer already uses).
 const GOALIE_CATEGORY_CALIBRATION: Record<string, CategoryCalibration> = {
   // A per-appearance win rate (0-1), not a count — same "totals / games"
   // math as every other category here works fine for a rate stat too.
   W: { baseline: 0.45, stdDev: 0.2, higherIsBetter: true },
-  SV: { baseline: 24, stdDev: 5.5, higherIsBetter: true },
-  GA: { baseline: 2.7, stdDev: 0.5, higherIsBetter: false },
+  GAA: { baseline: 2.7, stdDev: 0.5, higherIsBetter: false },
+  "SV%": { baseline: 0.905, stdDev: 0.012, higherIsBetter: true },
   SO: { baseline: 0.08, stdDev: 0.08, higherIsBetter: true },
 };
 
@@ -288,7 +300,7 @@ const DEFENSE_EMPHASIS: Record<string, number> = {
   BLK: 0.19,
   PIM: 0.12,
 };
-const GOALIE_EMPHASIS: Record<string, number> = { W: 0.35, SV: 0.2, GA: 0.3, SO: 0.15 };
+const GOALIE_EMPHASIS: Record<string, number> = { W: 0.35, "SV%": 0.2, GAA: 0.3, SO: 0.15 };
 
 function emphasisFor(position: Position): Record<string, number> {
   if (position === "G") return GOALIE_EMPHASIS;

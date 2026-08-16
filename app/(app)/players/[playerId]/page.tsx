@@ -47,7 +47,7 @@ export default async function PlayerDetailPage({
 
       <SectionCard title="Season">
         <div className="flex flex-col items-center gap-6 sm:flex-row sm:items-start">
-          <div className="shrink-0">
+          <div className="w-full max-w-[240px] shrink-0">
             <SeasonCard
               name={player.fullName}
               position={player.primaryPosition}
@@ -57,6 +57,13 @@ export default async function PlayerDetailPage({
               categoryScores={player.seasonRating?.categoryScores as Record<string, number> | null}
               teamName={teamName}
             />
+            {player.seasonRating && (
+              <p className="mt-2 text-center text-[11px] text-cream/50">
+                0–100 rating per category — {Math.round(player.seasonRating.currentSeasonWeight * 100)}%
+                this season, {Math.round((1 - player.seasonRating.currentSeasonWeight) * 100)}% last.
+                Not the same scale as the totals to the right.
+              </p>
+            )}
           </div>
           <div className="flex-1">
             <p className="mb-1 text-sm text-cream/70">
