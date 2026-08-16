@@ -310,12 +310,16 @@ safe any time). This is intentionally not a per-game number:
 
 - **Per-category 0–100 scores**: each category's blended per-game average
   (below) is standardized against a hand-calibrated baseline/stdDev for
-  that specific category (`SKATER_CATEGORY_CALIBRATION` /
-  `GOALIE_CATEGORY_CALIBRATION` in `lib/playerRating.ts`) — separate
-  constants from the per-game valuation model further down, tuned tighter
-  on purpose so a genuine top performer and a replacement-level one land
-  visibly apart (HUT/FUT gold vs. bronze), not clustered within a few
-  points of 50.
+  that specific category (`FORWARD_CATEGORY_CALIBRATION` /
+  `DEFENSE_CATEGORY_CALIBRATION` / `GOALIE_CATEGORY_CALIBRATION` in
+  `lib/playerRating.ts`) — separate constants from the per-game valuation
+  model further down, tuned tighter on purpose so a genuine top performer
+  and a replacement-level one land visibly apart (HUT/FUT gold vs. bronze),
+  not clustered within a few points of 50. Forwards and defensemen use
+  different offensive baselines (a defenseman scoring/assisting at a good
+  rate *for a defenseman* was landing below a baseline calibrated off
+  forward production, unfairly dragging every D's card down) — goalies get
+  their own table entirely.
 - **Overall**: a weighted average of those category scores, weighted
   differently by position (`FORWARD_EMPHASIS` / `DEFENSE_EMPHASIS` /
   `GOALIE_EMPHASIS`) — defensemen weight HIT/BLK/PIM more heavily than

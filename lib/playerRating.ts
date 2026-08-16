@@ -175,21 +175,42 @@ interface CategoryCalibration {
  * rostered (i.e. already above-replacement-level) NHL skater — there's no
  * league-wide data source wired up to derive these empirically. Reasonable
  * starting points, easiest single place to retune once real full-season
- * data makes the card scores feel too generous/harsh in practice. */
+ * data makes the card scores feel too generous/harsh in practice.
+ *
+ * Split by forward vs. defense (unlike the first version of this table,
+ * which shared one set of offensive baselines across both) — a defenseman
+ * scoring/assisting at even a good rate for their position was landing well
+ * below a baseline calibrated off forward-level production, dragging every
+ * D's card down regardless of how they actually compared to other
+ * defensemen. Forwards' baselines were also brought down some: the original
+ * numbers leaned toward "good top-6 producer," not the realistic average
+ * across a full rostered mix that includes bottom-6/depth players — enough
+ * that most real rosters were coming out under 50 across the board. */
 // stdDev values are tuned tighter than a "pure" statistical spread would
 // suggest, deliberately — the point of an Ultimate-Team-style card is
 // visible separation between a genuine top performer and a replacement-level
 // one (think HUT/FUT gold vs bronze), not a strict bell curve where nearly
 // everyone rostered lands within a few points of 50.
-const SKATER_CATEGORY_CALIBRATION: Record<string, CategoryCalibration> = {
-  G: { baseline: 0.22, stdDev: 0.12, higherIsBetter: true },
-  A: { baseline: 0.32, stdDev: 0.15, higherIsBetter: true },
-  PPP: { baseline: 0.14, stdDev: 0.1, higherIsBetter: true },
+const FORWARD_CATEGORY_CALIBRATION: Record<string, CategoryCalibration> = {
+  G: { baseline: 0.18, stdDev: 0.11, higherIsBetter: true },
+  A: { baseline: 0.24, stdDev: 0.13, higherIsBetter: true },
+  PPP: { baseline: 0.1, stdDev: 0.08, higherIsBetter: true },
   SHP: { baseline: 0.02, stdDev: 0.04, higherIsBetter: true },
-  SOG: { baseline: 2.1, stdDev: 0.65, higherIsBetter: true },
-  HIT: { baseline: 1.4, stdDev: 0.85, higherIsBetter: true },
-  BLK: { baseline: 0.9, stdDev: 0.6, higherIsBetter: true },
-  PIM: { baseline: 0.5, stdDev: 0.45, higherIsBetter: true },
+  SOG: { baseline: 1.9, stdDev: 0.6, higherIsBetter: true },
+  HIT: { baseline: 1.1, stdDev: 0.75, higherIsBetter: true },
+  BLK: { baseline: 0.5, stdDev: 0.35, higherIsBetter: true },
+  PIM: { baseline: 0.4, stdDev: 0.4, higherIsBetter: true },
+};
+
+const DEFENSE_CATEGORY_CALIBRATION: Record<string, CategoryCalibration> = {
+  G: { baseline: 0.09, stdDev: 0.07, higherIsBetter: true },
+  A: { baseline: 0.2, stdDev: 0.12, higherIsBetter: true },
+  PPP: { baseline: 0.08, stdDev: 0.07, higherIsBetter: true },
+  SHP: { baseline: 0.02, stdDev: 0.035, higherIsBetter: true },
+  SOG: { baseline: 1.6, stdDev: 0.55, higherIsBetter: true },
+  HIT: { baseline: 1.6, stdDev: 0.9, higherIsBetter: true },
+  BLK: { baseline: 1.3, stdDev: 0.75, higherIsBetter: true },
+  PIM: { baseline: 0.45, stdDev: 0.4, higherIsBetter: true },
 };
 
 const GOALIE_CATEGORY_CALIBRATION: Record<string, CategoryCalibration> = {
@@ -202,7 +223,8 @@ const GOALIE_CATEGORY_CALIBRATION: Record<string, CategoryCalibration> = {
 };
 
 function categoryCalibrationFor(position: Position): Record<string, CategoryCalibration> {
-  return position === "G" ? GOALIE_CATEGORY_CALIBRATION : SKATER_CATEGORY_CALIBRATION;
+  if (position === "G") return GOALIE_CATEGORY_CALIBRATION;
+  return position === "D" ? DEFENSE_CATEGORY_CALIBRATION : FORWARD_CATEGORY_CALIBRATION;
 }
 
 /**

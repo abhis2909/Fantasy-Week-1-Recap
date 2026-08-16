@@ -405,12 +405,31 @@ export default async function NhlSyncPage({
         // button — blendedSeasonScores falls back to each category's
         // baseline for exactly this case rather than wrongly treating it
         // as a real zero.
-        const lastSeasonGameLog = await getPlayerGameLog(nhlId, lastSeasonId, NHL_GAME_TYPE_REGULAR_SEASON);
-        const lastSeasonPerGame = mapGameLogToPerGameValues(
-          lastSeasonGameLog,
-          player.primaryPosition === "G" ? "G" : "SKATER"
-        );
-        const lastSeasonTotals = sumGameLogValues(lastSeasonPerGame);
+        //
+        // A rostered player having *no* last-season NHL record at all is
+        // common, not exceptional — rookies, recent call-ups, anyone who
+        // missed the whole prior season — and the NHL API 404s for that
+        // case rather than returning an empty log. That's expected, not a
+        // real failure, so it's caught here specifically (unlike the outer
+        // try/catch, which should still fail this player loudly for a
+        // genuine problem): treat it as "no last-season data," which
+        // blendedSeasonScores already knows how to fall back from, instead
+        // of aborting this player's whole update over it.
+        let lastSeasonTotals: Record<string, number> = {};
+        let lastSeasonGameCount = 0;
+        try {
+          const lastSeasonGameLog = await getPlayerGameLog(nhlId, lastSeasonId, NHL_GAME_TYPE_REGULAR_SEASON);
+          const lastSeasonPerGame = mapGameLogToPerGameValues(
+            lastSeasonGameLog,
+            player.primaryPosition === "G" ? "G" : "SKATER"
+          );
+          lastSeasonTotals = sumGameLogValues(lastSeasonPerGame);
+          lastSeasonGameCount = lastSeasonPerGame.length;
+        } catch {
+          // No last-season data available — fine, blendedSeasonScores
+          // falls back to each category's baseline for a player with 0
+          // last-season games.
+        }
         if (player.primaryPosition !== "G") {
           delete lastSeasonTotals.HIT;
           delete lastSeasonTotals.BLK;
@@ -425,7 +444,7 @@ export default async function NhlSyncPage({
 
         const { categoryScores, overall } = blendedSeasonScores(
           lastSeasonTotals,
-          lastSeasonPerGame.length,
+          lastSeasonGameCount,
           thisSeasonTotals,
           thisSeasonGameLogs.length,
           player.primaryPosition,
