@@ -313,13 +313,18 @@ safe any time). This is intentionally not a per-game number:
   that specific category (`FORWARD_CATEGORY_CALIBRATION` /
   `DEFENSE_CATEGORY_CALIBRATION` / `GOALIE_CATEGORY_CALIBRATION` in
   `lib/playerRating.ts`) — separate constants from the per-game valuation
-  model further down, tuned tighter on purpose so a genuine top performer
-  and a replacement-level one land visibly apart (HUT/FUT gold vs. bronze),
-  not clustered within a few points of 50. Forwards and defensemen use
-  different offensive baselines (a defenseman scoring/assisting at a good
-  rate *for a defenseman* was landing below a baseline calibrated off
-  forward production, unfairly dragging every D's card down) — goalies get
-  their own table entirely.
+  model further down. Forwards and defensemen use different offensive
+  baselines (a defenseman scoring/assisting at a good rate *for a
+  defenseman* was landing below a baseline calibrated off forward
+  production, unfairly dragging every D's card down) — goalies get their
+  own table entirely. The 0–100 mapping itself (`categoryScore`) is also
+  its own curve, not `standardizeRating` — anchored at 68 rather than 50,
+  and asymmetric: performance above baseline climbs faster per standard
+  deviation (11 pts) than performance below baseline falls (7 pts). A
+  symmetric 50-centered curve read as too flat/low for a HUT/FUT-style
+  card — "replacement level for a rostered player" should read like a
+  generic silver card in the 60s, not a 50, and a genuine star should be
+  able to break into the 90s.
 - **Overall**: a weighted average of those category scores, weighted
   differently by position (`FORWARD_EMPHASIS` / `DEFENSE_EMPHASIS` /
   `GOALIE_EMPHASIS`) — defensemen weight HIT/BLK/PIM more heavily than

@@ -238,12 +238,26 @@ export function categoryCodesForPosition(position: Position): string[] {
   return Object.keys(categoryCalibrationFor(position));
 }
 
+// Season card scores use a different curve from standardizeRating (shared
+// with the per-game/per-week system above, deliberately left alone) — a
+// symmetric bell curve centered on 50 doesn't match how HUT/FUT-style cards
+// actually read. "Replacement level for a rostered player" reads as a
+// mid-60s/generic-silver card there, not a 50; genuine stars are meant to
+// break into the 90s, not top out in the 70s-80s. So above-average
+// performance climbs faster per standard deviation than below-average
+// performance falls — anchored higher than 50, and asymmetric on purpose.
+const CARD_SCORE_ANCHOR = 68;
+const CARD_SCORE_ABOVE_PER_STDDEV = 11;
+const CARD_SCORE_BELOW_PER_STDDEV = 7;
+
 /** One category's 0-100 sub-score from its per-game average, honoring
  * higherIsBetter (GA needs lower-is-better standardization, same as GAA
  * does for Standings). */
 function categoryScore(perGameAvg: number, calib: CategoryCalibration): number {
   const sign = calib.higherIsBetter ? 1 : -1;
-  return standardizeRating(sign * perGameAvg, sign * calib.baseline, calib.stdDev);
+  const z = (sign * (perGameAvg - calib.baseline)) / calib.stdDev;
+  const perStdDev = z >= 0 ? CARD_SCORE_ABOVE_PER_STDDEV : CARD_SCORE_BELOW_PER_STDDEV;
+  return Math.round(Math.max(0, Math.min(100, CARD_SCORE_ANCHOR + z * perStdDev)));
 }
 
 /**
