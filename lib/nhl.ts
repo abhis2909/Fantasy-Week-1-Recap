@@ -385,6 +385,29 @@ export async function getRawBoxscoreJson(gameId: number): Promise<unknown> {
   return res.json();
 }
 
+/** A gameId -> skater hits/blocks map, shared across every player processed
+ * in one sync run — many rostered players share NHL games (same team, or
+ * just an overlapping schedule), so this avoids re-fetching the same
+ * boxscore once per player. Not perfectly race-free under concurrency (two
+ * players hitting an uncached gameId at the same instant can both fetch
+ * once before either caches), but that's just a little wasted work, not a
+ * correctness problem — the caller's own upsert underneath is what
+ * actually needs to be safe to repeat, and it already is. Shared by both
+ * "Weekly stat sync" and "Sync full season game logs" (and its
+ * progress-tracked variant), hence living here rather than in either
+ * caller.
+ */
+export function createBoxscoreCache() {
+  const cache = new Map<number, Map<number, GameHitsBlocks>>();
+  return async function cachedBoxscore(gameId: number): Promise<Map<number, GameHitsBlocks>> {
+    const existing = cache.get(gameId);
+    if (existing) return existing;
+    const fetched = await getGameHitsAndBlocks(gameId);
+    cache.set(gameId, fetched);
+    return fetched;
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Full team rosters — for pre-loading the entire active NHL player pool as
 // free agents, ahead of needing them (e.g. before a future Yahoo sync can

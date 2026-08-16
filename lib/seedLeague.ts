@@ -173,6 +173,10 @@ export async function seedLeague(prisma: PrismaClient): Promise<SeedResult> {
   await prisma.league.deleteMany();
   await prisma.player.deleteMany();
   await prisma.user.deleteMany();
+  // Not League/Player-scoped either (it's sync-operation metadata, not
+  // fantasy content) — wiped mainly so a fresh seed doesn't show a stale
+  // "last synced" progress bar left over from before the reseed.
+  await prisma.syncProgress.deleteMany();
 
   console.log("Creating league, season, categories...");
   const league = await prisma.league.create({

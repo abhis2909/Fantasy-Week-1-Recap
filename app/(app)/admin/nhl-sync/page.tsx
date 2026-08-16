@@ -13,8 +13,8 @@ import {
   getRawSearchJson,
   getTeamRoster,
   getRawTeamRosterJson,
-  getGameHitsAndBlocks,
   getRawBoxscoreJson,
+  createBoxscoreCache,
   aggregateSkaterStats,
   aggregateGoalieStats,
   mapGameLogToPerGameValues,
@@ -23,10 +23,12 @@ import {
   gameIdOf,
   NHL_GAME_TYPE_REGULAR_SEASON,
   NHL_TEAM_ABBREVS,
-  type GameHitsBlocks,
 } from "@/lib/nhl";
 import { isLegacyFictionalName } from "@/lib/depthPlayerNames";
 import { renameLegacyFictionalPlayers } from "@/lib/playerCleanup";
+import { runFullSeasonGameLogSync } from "@/lib/syncJobs";
+import { FULL_SEASON_SYNC_PROGRESS_KEY } from "@/lib/syncProgress";
+import { SyncGameLogsProgress } from "@/components/admin/SyncGameLogsProgress";
 import {
   sumGameLogValues,
   blendedCategoryAverages,
@@ -45,26 +47,6 @@ export const maxDuration = 300;
 
 function qs(params: Record<string, string | number>) {
   return new URLSearchParams(Object.fromEntries(Object.entries(params).map(([k, v]) => [k, String(v)]))).toString();
-}
-
-/** A gameId -> skater hits/blocks map, shared across every player processed
- * in one sync run — many rostered players share NHL games (same team, or
- * just an overlapping schedule), so this avoids re-fetching the same
- * boxscore once per player. Not perfectly race-free under concurrency (two
- * players hitting an uncached gameId at the same instant can both fetch
- * once before either caches), but that's just a little wasted work, not a
- * correctness problem — the shared prisma.playerGameLog upsert underneath
- * is what actually needs to be safe to repeat, and it already is.
- */
-function createBoxscoreCache() {
-  const cache = new Map<number, Map<number, GameHitsBlocks>>();
-  return async function cachedBoxscore(gameId: number): Promise<Map<number, GameHitsBlocks>> {
-    const existing = cache.get(gameId);
-    if (existing) return existing;
-    const fetched = await getGameHitsAndBlocks(gameId);
-    cache.set(gameId, fetched);
-    return fetched;
-  };
 }
 
 export default async function NhlSyncPage({
@@ -272,86 +254,22 @@ export default async function NhlSyncPage({
     );
   }
 
+  /**
+   * Plain server-action fallback for "Sync full season game logs" — same
+   * "boring but always works, no live feedback" reasoning as
+   * /api/admin/cleanup-fictional-names: blocks until the whole sync
+   * finishes with zero progress feedback, but doesn't depend on fetch/JS
+   * working right. The primary path is SyncGameLogsProgress below, which
+   * calls the same runFullSeasonGameLogSync through
+   * POST /api/admin/sync-game-logs and polls for live progress instead.
+   */
   async function syncGameLogs() {
     "use server";
-    const activeRoster = await prisma.rosterEntry.findMany({
-      where: { droppedAt: null, team: { seasonId: season.id } },
-      include: { player: true },
-    });
     const seasonId = `${season.year}${season.year + 1}`;
-    const cachedBoxscore = createBoxscoreCache();
-
-    let playersMatched = 0;
-    let gamesUpserted = 0;
-    const skipped: string[] = [];
-    const errored: string[] = [];
-
-    await mapWithConcurrency(activeRoster, 6, async (entry) => {
-      const player = entry.player;
-      try {
-        let nhlId = player.externalId ? Number(player.externalId) : null;
-        if (!nhlId) {
-          const match = await findBestNhlMatch(player.fullName);
-          if (!match) {
-            skipped.push(player.fullName);
-            return;
-          }
-          nhlId = match.nhlPlayerId;
-          await prisma.player.update({
-            where: { id: player.id },
-            data: {
-              externalId: String(nhlId),
-              externalSource: "NHL_SYNC",
-              nhlTeamAbbrev: match.teamAbbrev ?? player.nhlTeamAbbrev,
-            },
-          });
-        }
-
-        const gameLog = await getPlayerGameLog(nhlId, seasonId, NHL_GAME_TYPE_REGULAR_SEASON);
-        const perGame = mapGameLogToPerGameValues(gameLog, player.primaryPosition === "G" ? "G" : "SKATER");
-        if (perGame.length === 0) {
-          skipped.push(`${player.fullName} (no games found)`);
-          return;
-        }
-
-        // Hits/blocks aren't in the game-log response at all — pull them
-        // from each game's boxscore instead, for skaters only. Bounded
-        // concurrency within a player's own games on top of the outer
-        // per-player concurrency, since a full season can be 70+ games.
-        if (player.primaryPosition !== "G") {
-          await mapWithConcurrency(perGame, 4, async (g) => {
-            try {
-              const box = await cachedBoxscore(g.gameId);
-              const hb = box.get(nhlId);
-              if (hb) {
-                g.values.HIT = hb.hits;
-                g.values.BLK = hb.blockedShots;
-              }
-            } catch {
-              // Leave this game's HIT/BLK at 0 rather than failing the
-              // whole player over one bad boxscore fetch.
-            }
-          });
-        }
-
-        for (const g of perGame) {
-          await prisma.playerGameLog.upsert({
-            where: { playerId_gameDate: { playerId: player.id, gameDate: new Date(`${g.gameDate}T00:00:00Z`) } },
-            create: {
-              playerId: player.id,
-              gameDate: new Date(`${g.gameDate}T00:00:00Z`),
-              values: g.values,
-              source: "NHL_SYNC",
-            },
-            update: { values: g.values, source: "NHL_SYNC" },
-          });
-          gamesUpserted++;
-        }
-        playersMatched++;
-      } catch (err) {
-        errored.push(`${player.fullName} (${err instanceof Error ? err.message : "unknown error"})`);
-      }
-    });
+    const { playersMatched, gamesUpserted, skipped, errored } = await runFullSeasonGameLogSync(
+      season.id,
+      seasonId
+    );
 
     revalidatePath("/admin/nhl-sync");
     redirect(
@@ -761,26 +679,35 @@ export default async function NhlSyncPage({
           game-log endpoint above doesn&apos;t report either at all) — one extra request per
           distinct game a rostered skater played, cached and reused across players who share a
           game. For a full season across a real roster that can mean hundreds of extra requests,
-          so this can take a few minutes on a fresh run.
+          so this can take a few minutes on a fresh run — the progress bar below tracks it live
+          rather than leaving the page looking frozen until it&apos;s done.
         </p>
-        {gamesMatched && (
-          <HighlightBox title="Sync complete">
-            <p>
-              Synced {gamesSynced} game{gamesSynced === "1" ? "" : "s"} across {gamesMatched}{" "}
-              player{gamesMatched === "1" ? "" : "s"}.
-            </p>
-            {gamesSkipped.length > 0 && <p className="mt-2">No exact match: {gamesSkipped.join(", ")}</p>}
-            {gamesErrored.length > 0 && <p className="mt-2 text-danger">Errors: {gamesErrored.join(", ")}</p>}
-          </HighlightBox>
-        )}
-        <form action={syncGameLogs}>
-          <button
-            type="submit"
-            className="mt-2 rounded-lg bg-gold px-4 py-2 text-sm font-semibold text-navy-deep transition hover:bg-gold-bright"
-          >
-            Sync full season game logs
-          </button>
-        </form>
+        <SyncGameLogsProgress progressKey={FULL_SEASON_SYNC_PROGRESS_KEY} />
+        <details className="mt-4">
+          <summary className="cursor-pointer text-xs tracking-wide text-cream/50 uppercase">
+            Progress bar not working? Use the plain fallback
+          </summary>
+          <div className="mt-3">
+            {gamesMatched && (
+              <HighlightBox title="Sync complete">
+                <p>
+                  Synced {gamesSynced} game{gamesSynced === "1" ? "" : "s"} across {gamesMatched}{" "}
+                  player{gamesMatched === "1" ? "" : "s"}.
+                </p>
+                {gamesSkipped.length > 0 && <p className="mt-2">No exact match: {gamesSkipped.join(", ")}</p>}
+                {gamesErrored.length > 0 && <p className="mt-2 text-danger">Errors: {gamesErrored.join(", ")}</p>}
+              </HighlightBox>
+            )}
+            <form action={syncGameLogs}>
+              <button
+                type="submit"
+                className="mt-2 rounded-lg border border-gold/50 px-4 py-2 text-sm font-semibold text-gold transition hover:bg-gold/10"
+              >
+                Sync full season game logs (no progress bar, same as before)
+              </button>
+            </form>
+          </div>
+        </details>
       </SectionCard>
 
       <SectionCard title="Player card scores">

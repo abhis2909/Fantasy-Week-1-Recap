@@ -267,6 +267,28 @@ model PlayerSeasonRating {
   updatedAt           DateTime @updatedAt
 }
 
+/// Live progress for a long-running admin sync (e.g. "Sync full season game
+/// logs") — a plain Server Action gives the browser zero feedback until it
+/// fully completes, which for a request-heavy sync across a whole roster
+/// can be minutes and just looks frozen. The sync itself runs in the
+/// background (Next's `after()`, kept alive past the response) and writes
+/// its progress here as it goes; a client component polls it via
+/// /api/admin/sync-progress to render a real progress bar. One row per
+/// distinct sync `key` (not per run) — each new run just resets the same
+/// row, since only the most recent run of a given sync is ever relevant.
+model SyncProgress {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  total     Int
+  completed Int      @default(0)
+  /// "running" | "done" | "error"
+  status    String
+  /// Human-readable result once status is "done"/"error" — e.g. "62 synced,
+  /// 3 skipped, 1 errored" — null while still running.
+  message   String?
+  updatedAt DateTime @updatedAt
+}
+
 model Matchup {
   id               String  @id @default(cuid())
   week             Week    @relation(fields: [weekId], references: [id], onDelete: Cascade)

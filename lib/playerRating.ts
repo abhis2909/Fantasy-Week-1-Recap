@@ -320,15 +320,21 @@ export interface PlayerCategoryInputs {
   averages: Record<string, number | null>;
 }
 
+/** No rostered player reads as a genuine 0 or a perfect 100 — 55 is the
+ * lowest any category (or, in practice via the weighted average below,
+ * overall) can ever read, and 95 the highest, so a true elite performer
+ * (near-top-of-the-roster across most of their weighted categories) lands
+ * around 85-95 overall rather than needing to hit the hard ceiling itself
+ * to look "elite." */
+const CATEGORY_SCORE_FLOOR = 55;
+const CATEGORY_SCORE_CEILING = 95;
 /** A player with no real data for a category (see blendedPerGameAverage)
  * gets exactly this for that one category — not excluded from the card,
- * not a fabricated top or bottom rank, just "unknown, assume average." */
-const NEUTRAL_CATEGORY_SCORE = 50;
-/** No rostered player reads as a genuine 0 or a perfect 100 — leaves
- * headroom in both directions and matches how HUT/FUT-style ratings read
- * (nobody's actually a 0, nobody's actually 100). */
-const CATEGORY_SCORE_FLOOR = 40;
-const CATEGORY_SCORE_CEILING = 99;
+ * not a fabricated top or bottom rank, just "unknown, assume average."
+ * The midpoint of the floor/ceiling above, not a flat 50 — that would
+ * itself read as *worse* than the documented floor for players who do
+ * have real data. */
+const NEUTRAL_CATEGORY_SCORE = Math.round((CATEGORY_SCORE_FLOOR + CATEGORY_SCORE_CEILING) / 2);
 
 function positionGroup(position: Position): "forward" | "defense" | "goalie" {
   if (position === "G") return "goalie";

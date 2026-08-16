@@ -269,11 +269,40 @@ name) to see the real JSON, and `getGameHitsAndBlocks`/
 
 One extra API call per distinct game (not per player) adds up on a full
 season sync across a real roster — potentially hundreds of extra requests
-— so `maxDuration` on this page is 300s and a fresh full-season sync can
-take a few minutes. It's a safe upsert per game, so a partial timeout just
-means fewer games got the hits/blocks enrichment on that run; re-running
-picks up where it left off (already-cached boxscores just get re-fetched,
-nothing is lost).
+— so `maxDuration` on this page (and the API route below) is 300s and a
+fresh full-season sync can take a few minutes. It's a safe upsert per
+game, so a partial timeout just means fewer games got the hits/blocks
+enrichment on that run; re-running picks up where it left off
+(already-cached boxscores just get re-fetched, nothing is lost).
+
+**"Sync full season game logs" shows live progress, not just a spinner.**
+A plain server-action button blocks with zero feedback until the whole
+sync finishes — for something that can take minutes, that just looks like
+the page froze. The primary button now:
+
+1. `POST /api/admin/sync-game-logs` starts a `SyncProgress` row (one
+   `total`/`completed`/`status` row per sync type, `lib/syncProgress.ts`)
+   and responds immediately — the actual sync runs after the response via
+   Next's `after()`, which keeps the serverless function alive up to
+   `maxDuration` without blocking the request that triggered it.
+2. `components/admin/SyncGameLogsProgress.tsx` (client component) polls
+   `GET /api/admin/sync-progress?key=...` every ~1.2s and renders a real
+   progress bar — `completed`/`total` players processed, incremented once
+   per player (matched, skipped, or errored alike) by the shared sync
+   logic in `lib/syncJobs.ts`.
+3. Once `status` flips to `done`/`error`, the client shows the final
+   summary and calls `router.refresh()` so the rest of the page (game log
+   count, etc.) picks up the new data.
+
+The sync logic itself (`runFullSeasonGameLogSync`) is shared between this
+route and a plain server-action fallback still on the page (behind a
+"progress bar not working?" disclosure) — same "boring but always works,
+no live feedback" reasoning as `/api/admin/cleanup-fictional-names`
+elsewhere on this page, for when `fetch`/JS is somehow unavailable. Only
+"Sync full season game logs" got this treatment so far, as the one
+actually reported freezing — the other sync buttons on this page could get
+the same pattern later if needed, reusing `lib/syncProgress.ts` with a new
+key.
 
 **The NHL API has an undocumented rate limit** — confirmed live: a
 full-roster action run at concurrency 6 got every single request 429'd.
@@ -331,14 +360,17 @@ safe any time). This is intentionally not a per-game number:
   `lib/playerRating.ts` replaced that entirely: every active-roster
   player's blended per-game average (see below) in a category is ranked
   against every *other* rostered player at the same position group
-  (forward / defense / goalie), and that rank becomes the score (40 for
-  the group's worst, 99 for its best, linear in between). Nothing here is
-  invented — a player's G score is purely a function of how their real
-  synced NHL goal rate compares to their real teammates' and opponents'
-  real synced goal rates. It also means the score self-calibrates to
-  whatever this specific league's actual talent pool looks like, rather
-  than needing to guess in advance whether a league is stacked with stars
-  or has a lot of replacement-level bench players.
+  (forward / defense / goalie), and that rank becomes the score (55 for
+  the group's worst, 95 for its best, linear in between — narrow enough
+  that a genuinely elite performer, near the top across most of their
+  weighted categories, lands around 85-95 *overall* without needing to
+  hit the hard ceiling itself). Nothing here is invented — a player's G
+  score is purely a function of how their real synced NHL goal rate
+  compares to their real teammates' and opponents' real synced goal
+  rates. It also means the score self-calibrates to whatever this
+  specific league's actual talent pool looks like, rather than needing to
+  guess in advance whether a league is stacked with stars or has a lot of
+  replacement-level bench players.
 - **Needs the whole roster at once.** A percentile is meaningless against
   a population of one, so "Update season card scores" computes every
   rostered player's blended per-game averages first (`playerInputs`), then
