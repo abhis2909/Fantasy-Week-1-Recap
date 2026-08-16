@@ -64,3 +64,38 @@ body {
     animation: hero-rise 0.6s ease-out 0.15s both;
   }
 }
+
+/* Team of the Week's "walkout" reveal — cards materialize in a FIFA
+   pack-opening style flourish (rise + overshoot + a brief brightness flash)
+   once the commissioner clicks Reveal, staggered player-by-player via each
+   card's own animation-delay (set inline, worst rating to best, so the
+   suspense builds toward the top performer). Gated behind
+   prefers-reduced-motion the same way hero-rise is above — the component
+   itself skips straight to the revealed state with no delay/animation for
+   reduced-motion, this is only the flourish for everyone else. */
+@keyframes card-walkout {
+  0% {
+    opacity: 0;
+    transform: translateY(46px) scale(0.82) rotateX(12deg);
+    filter: brightness(1.7);
+  }
+  55% {
+    opacity: 1;
+    transform: translateY(-8px) scale(1.06) rotateX(0deg);
+    filter: brightness(1.35);
+  }
+  80% {
+    transform: translateY(2px) scale(0.99);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1) rotateX(0deg);
+    filter: brightness(1);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .animate-card-walkout {
+    animation: card-walkout 0.65s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+}

@@ -368,9 +368,11 @@ Until "Update season card scores" has run for a player, their card shows
 ### Per-game rating (Last 10 games, Team of the Week)
 
 The detail page's **Last 10 games** list, and Team of the Week
-(`components/totw/PlayerCard.tsx` — a separate, deliberately-unchanged card
-for a specific week's standout performances), use a different,
-per-game/per-week rating: a fixed-weight valuation model
+(`components/totw/PlayerCard.tsx` — team-colored like the season card, but
+deliberately keeping its own weekly rating rather than the season blend,
+since the whole point of Team of the Week is a specific week's standout
+performance), use a different, per-game/per-week rating: a fixed-weight
+valuation model
 (`lib/playerRating.ts`) — originally a peer-relative z-score (a player's
 game judged against other rostered players at their position that week),
 replaced with a commissioner-provided formula since the peer-comparison
@@ -403,6 +405,23 @@ other is "how good is this player this year."
 
 Both need the "Sync full season game logs" admin action above to have run
 at least once; until then, player pages show "no synced games yet."
+
+### Team of the Week's reveal
+
+`/team-of-the-week` loads with the lineup face-down — mystery cards in the
+actual formation (LW/C/RW, D, G) behind a "Reveal Team of the Week"
+button — rather than showing every pick immediately
+(`components/totw/TeamRevealSequence.tsx`, a client component; the page
+itself stays a server component and just passes it the already-computed
+picks). Clicking it walks the real cards in one at a time via a staggered
+CSS animation (`card-walkout` in `app/globals.css`), **weakest rating
+first and the week's best performer last** — reveal order is independent
+of each card's actual formation slot, so the suspense is deliberate, not
+just "whatever order they load in." Respects `prefers-reduced-motion` the
+same way `Reveal` elsewhere on the site does: the keyframe is only defined
+inside a `no-preference` media query, so a reduced-motion visitor still
+gets the click-to-reveal interaction, just with every card appearing at
+once instead of staggered.
 
 ## Design system
 

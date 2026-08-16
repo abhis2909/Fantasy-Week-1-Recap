@@ -6,6 +6,9 @@ export interface WeeklyPlayerScore {
   playerId: string;
   playerName: string;
   photoUrl: string | null;
+  /** Real NHL team abbreviation — for theming, not to be confused with the
+   * fantasy teamId/teamName below. */
+  nhlTeamAbbrev: string | null;
   teamId: string;
   teamName: string;
   position: Position;
@@ -49,6 +52,7 @@ export async function computeWeeklyPlayerScores(
       playerId: slot.playerId,
       playerName: slot.player.fullName,
       photoUrl: slot.player.photoUrl,
+      nhlTeamAbbrev: slot.player.nhlTeamAbbrev,
       teamId: slot.teamId,
       teamName: slot.team.name,
       position: slot.slot,
@@ -67,6 +71,7 @@ export interface TeamOfWeekPick {
   playerId: string;
   playerName: string;
   photoUrl: string | null;
+  nhlTeamAbbrev: string | null;
   teamName: string;
   rawScore: number;
   values: Record<string, number>;
@@ -112,6 +117,7 @@ export async function computeTeamOfWeek(weekId: string): Promise<TeamOfWeekPick[
         playerId: c.playerId,
         playerName: c.playerName,
         photoUrl: c.photoUrl,
+        nhlTeamAbbrev: c.nhlTeamAbbrev,
         teamName: c.teamName,
         rawScore: c.score,
         values: c.values,

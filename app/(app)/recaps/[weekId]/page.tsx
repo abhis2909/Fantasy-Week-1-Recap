@@ -64,6 +64,7 @@ export default async function RecapArticlePage({
                       name={sel.player.fullName}
                       position={sel.position}
                       photoUrl={sel.player.photoUrl}
+                      nhlTeamAbbrev={sel.player.nhlTeamAbbrev}
                       rating={sel.rating}
                       statLine={shortStatSummary(sel.position, valuesByPlayer.get(sel.playerId) ?? {})}
                     />
