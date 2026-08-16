@@ -762,15 +762,22 @@ export default async function NhlSyncPage({
       </SectionCard>
 
       <SectionCard title="Player card scores">
-        <p className="mb-4 text-cream/80">
+        <p className="mb-3 text-cream/80">
           {seasonRatingCount} of {players.length} players have a card score. This is the
           &quot;Ultimate Team&quot;-style overall + per-category rating shown on player cards —
           separate from the per-game ratings above. It starts as last season&apos;s rating and
           blends toward this season&apos;s actual performance as the season progresses (currently{" "}
           {Math.round(seasonBlendWeight(new Date(), season.year) * 100)}% this season, the rest
-          last season) — re-run this roughly monthly to keep that blend and the underlying stats
-          current. Requires last season&apos;s game log, so it makes one extra NHL request per
-          rostered player on top of whatever &quot;Sync full season game logs&quot; already did.
+          last season). Requires last season&apos;s game log, so it makes one extra NHL request
+          per rostered player on top of whatever &quot;Sync full season game logs&quot; already
+          did.
+        </p>
+        <p className="mb-4 rounded-lg border border-gold/40 bg-gold/10 px-3 py-2 text-sm text-gold">
+          <strong>This is a separate step from syncing stats above.</strong> Running &quot;Sync
+          full season game logs&quot; does <em>not</em> refresh card scores — the numbers on
+          player cards won&apos;t reflect newly-synced stats until this button is run again too.
+          Re-run it after every stats sync, and roughly monthly regardless, to keep the season
+          blend current.
         </p>
         {seasonScoresUpdated && (
           <HighlightBox title="Update complete">

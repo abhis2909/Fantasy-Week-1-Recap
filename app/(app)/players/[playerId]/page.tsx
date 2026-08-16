@@ -4,9 +4,21 @@ import { SectionCard } from "@/components/ui/SectionCard";
 import { SeasonCard } from "@/components/players/SeasonCard";
 import { prisma } from "@/lib/prisma";
 import { formatStatValue } from "@/lib/formatStatValue";
+import { formatRelativeTime } from "@/lib/formatRelativeTime";
 import { shortStatSummary } from "@/lib/statSummary";
 import { rateGamesForPlayer, seasonTotalsForPlayer } from "@/lib/playerRating";
 import { getCurrentSeason } from "@/lib/currentSeason";
+
+/** Flags the card score as visibly stale past this age — "Sync full season
+ * game logs" and "Update season card scores" are separate admin buttons
+ * (the former doesn't trigger the latter), so it's easy to sync fresh stats
+ * and never notice the card score wasn't recomputed against them. Loud
+ * rather than silent about it, since a stale card score doesn't error or
+ * look obviously broken — it just quietly shows numbers that no longer
+ * match reality. 3 days, not the ~monthly cadence "Update season card
+ * scores" is meant to run at — an unnoticed staleness bug is worse than a
+ * slightly premature warning. */
+const STALE_CARD_MS = 3 * 24 * 60 * 60 * 1000;
 
 export default async function PlayerDetailPage({
   params,
@@ -37,6 +49,10 @@ export default async function PlayerDetailPage({
       ? Math.round(ratedGames.reduce((sum, g) => sum + g.rating, 0) / ratedGames.length)
       : null;
   const teamName = player.rosterEntries[0]?.team.name;
+  const now = new Date();
+  const cardIsStale = player.seasonRating
+    ? now.getTime() - player.seasonRating.updatedAt.getTime() > STALE_CARD_MS
+    : false;
 
   return (
     <>
@@ -58,11 +74,23 @@ export default async function PlayerDetailPage({
               teamName={teamName}
             />
             {player.seasonRating && (
-              <p className="mt-2 text-center text-[11px] text-cream/50">
-                0–100 rating per category — {Math.round(player.seasonRating.currentSeasonWeight * 100)}%
-                this season, {Math.round((1 - player.seasonRating.currentSeasonWeight) * 100)}% last.
-                Not the same scale as the totals to the right.
-              </p>
+              <>
+                <p className="mt-2 text-center text-[11px] text-cream/50">
+                  0–100 rating per category — {Math.round(player.seasonRating.currentSeasonWeight * 100)}%
+                  this season, {Math.round((1 - player.seasonRating.currentSeasonWeight) * 100)}% last.
+                  Not the same scale as the totals to the right.
+                </p>
+                <p
+                  className={`mt-1 text-center text-[11px] ${
+                    cardIsStale ? "font-semibold text-danger" : "text-cream/40"
+                  }`}
+                >
+                  Card score last updated {formatRelativeTime(player.seasonRating.updatedAt, now)}
+                  {cardIsStale
+                    ? " — stats above may be newer. Re-run “Update season card scores” on the NHL Sync admin page (syncing stats alone does not refresh it)."
+                    : "."}
+                </p>
+              </>
             )}
           </div>
           <div className="flex-1">
