@@ -106,6 +106,27 @@ function normalizeName(name: string): string {
 }
 
 /**
+ * Thrown when a response comes back structurally empty in a way that's
+ * never legitimate — e.g. a completed game's boxscore reporting zero
+ * skaters, or an NHL team's roster reporting zero players — as opposed to
+ * an ordinary fetch failure (network blip, one bad ID, a transient 5xx).
+ * Both of this file's two unverified-shape endpoints (roster, boxscore)
+ * degrade to an empty array rather than throwing when the parser can't
+ * find the field it expects (e.g. `playerByGameStats` renamed or
+ * restructured), so a genuine shape break would otherwise look exactly
+ * like "this game had no hits" or "this team has no players" — silently
+ * wrong data with zero visible error, the worst kind of bug. Callers that
+ * treat a single failed game/team as skippable (reasonable for a real
+ * transient blip — one bad boxscore shouldn't fail an entire roster sync)
+ * must NOT swallow this specific error type the same way; it means every
+ * subsequent call is about to fail identically, and that needs to surface,
+ * not get quietly absorbed into a wall of zeros. See getGameHitsAndBlocks
+ * and getTeamRoster below, and their callers in lib/syncJobs.ts and
+ * app/(app)/admin/nhl-sync/page.tsx.
+ */
+export class NhlShapeError extends Error {}
+
+/**
  * Best-effort exact-name match against NHL search results, restricted to
  * currently-active players — this league only cares about players who
  * could actually be rostered this season, so a retired/minor-league player
@@ -366,6 +387,18 @@ export async function getGameHitsAndBlocks(gameId: number): Promise<Map<number, 
   if (!res.ok) throw new Error(`NHL boxscore request failed for game ${gameId} (${res.status})`);
   const json = (await res.json()) as Record<string, unknown>;
   const skaters = extractBoxscoreSkaters(json);
+  // A completed NHL game always dresses ~36-40 skaters across both teams —
+  // zero here is never a real "no hits recorded" answer, only a sign that
+  // playerByGameStats (or its forwards/defense nesting) isn't where this
+  // code expects it anymore. Thrown as NhlShapeError specifically so
+  // per-game callers that otherwise skip a single bad boxscore and move on
+  // don't do the same thing here and quietly zero out HIT/BLK for an
+  // entire sync run.
+  if (skaters.length === 0) {
+    throw new NhlShapeError(
+      `NHL boxscore for game ${gameId} had no skaters under playerByGameStats — the response shape may have changed. Use the "Debug: preview a raw NHL boxscore response" tool on /admin/nhl-sync with this game ID to inspect the real JSON.`
+    );
+  }
   const parsed = z.array(BoxscoreSkaterStatSchema).safeParse(skaters);
   if (!parsed.success) {
     throw new Error(`Unexpected response shape from NHL boxscore API for game ${gameId}`);
@@ -474,6 +507,17 @@ export async function getTeamRoster(teamAbbrev: string): Promise<NhlRosterPlayer
   const json = (await res.json()) as Record<string, unknown>;
   const groups = ["forwards", "defensemen", "goalies"] as const;
   const all = groups.flatMap((g) => (Array.isArray(json[g]) ? (json[g] as unknown[]) : []));
+  // A real NHL team always carries 20+ players across these three groups —
+  // zero is never a legitimate "this team has no roster," only a sign the
+  // forwards/defensemen/goalies keys (or their nesting) aren't where this
+  // code expects them anymore. NhlShapeError so this reads as a real,
+  // actionable failure in the pool-import error list rather than silently
+  // importing nothing for the team and looking like it just succeeded.
+  if (all.length === 0) {
+    throw new NhlShapeError(
+      `NHL roster response for ${teamAbbrev} had no players under forwards/defensemen/goalies — the response shape may have changed. Use the "Debug: preview a raw NHL roster response" tool on /admin/nhl-sync to inspect the real JSON.`
+    );
+  }
   const parsed = z.array(RosterPlayerSchema).safeParse(all);
   if (!parsed.success) {
     throw new Error(`Unexpected response shape from NHL roster API for ${teamAbbrev}`);

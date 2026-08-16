@@ -5,6 +5,7 @@ import {
   mapGameLogToPerGameValues,
   mapWithConcurrency,
   createBoxscoreCache,
+  NhlShapeError,
   NHL_GAME_TYPE_REGULAR_SEASON,
 } from "@/lib/nhl";
 import { incrementSyncProgress } from "@/lib/syncProgress";
@@ -72,9 +73,15 @@ async function syncOnePlayerGameLog(
             g.values.HIT = hb.hits;
             g.values.BLK = hb.blockedShots;
           }
-        } catch {
-          // Leave this game's HIT/BLK at 0 rather than failing the whole
-          // player over one bad boxscore fetch.
+        } catch (err) {
+          // NhlShapeError means the boxscore response's structure itself
+          // doesn't match what's expected anymore — every remaining game
+          // is about to fail the exact same way, so let this one propagate
+          // (up to the outer try/catch below) rather than silently leaving
+          // HIT/BLK at 0 and reporting this player as a clean success. Any
+          // other error is treated as one bad game (network blip, a single
+          // malformed response) and doesn't need to fail the whole player.
+          if (err instanceof NhlShapeError) throw err;
         }
       });
     }

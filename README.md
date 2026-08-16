@@ -275,6 +275,31 @@ game, so a partial timeout just means fewer games got the hits/blocks
 enrichment on that run; re-running picks up where it left off
 (already-cached boxscores just get re-fetched, nothing is lost).
 
+**Endpoint audit against an external NHL API reference doc (an unofficial
+but thorough community write-up covering `api-web.nhle.com` and
+`api.nhle.com/stats/rest`).** Every endpoint this app actually calls —
+game log, player landing, team roster, boxscore — matched the doc's
+documented path and parameters exactly, so there was no wrong-URL or
+wrong-parameter bug hiding anywhere. The doc is an endpoint index, though,
+not a schema reference — it doesn't include real response bodies, so it
+couldn't confirm or deny the two shapes above that were already flagged
+unverified (roster, boxscore). What it prompted instead: a look at how
+those two endpoints fail when their shape doesn't match what
+`getTeamRoster`/`getGameHitsAndBlocks` expect — and both quietly degraded
+to an empty result (an empty roster, an empty hits/blocks map) rather than
+raising an error, which downstream code couldn't tell apart from "this
+team just has no players" or "this game had no hits," i.e. exactly the
+"stats aren't running properly, and nothing even says why" failure mode.
+Both endpoints now throw a distinct `NhlShapeError` when they parse to
+zero players/skaters (never a legitimate real answer — an NHL team and a
+completed game both always have players), and the per-game/per-team
+callers that otherwise treat *one* bad fetch as skippable (a real
+transient blip shouldn't fail an entire sync) specifically don't swallow
+this one — it propagates up into that player's/team's entry in the sync
+error list instead. A real shape break now shows up as a wall of clearly
+worded errors across the whole roster, not a clean-looking "0 errors" run
+with quietly-wrong stats.
+
 **"Sync full season game logs" shows live progress, not just a spinner —
 and does the work in small chunks, not one long request.** A plain
 server-action button blocks with zero feedback until the whole sync

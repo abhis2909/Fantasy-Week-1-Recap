@@ -15,6 +15,7 @@ import {
   getRawTeamRosterJson,
   getRawBoxscoreJson,
   createBoxscoreCache,
+  NhlShapeError,
   aggregateSkaterStats,
   aggregateGoalieStats,
   mapGameLogToPerGameValues,
@@ -212,9 +213,13 @@ export default async function NhlSyncPage({
                 hits += hb.hits;
                 blockedShots += hb.blockedShots;
               }
-            } catch {
-              // Leave this game's contribution at 0 rather than failing
-              // the whole player over one bad boxscore fetch.
+            } catch (err) {
+              // A shape break means every remaining game will fail the
+              // same way — surface it (caught by the outer try/catch
+              // below) instead of quietly leaving HIT/BLK at 0 for this
+              // player. An ordinary one-off fetch failure still just
+              // costs this one game's contribution.
+              if (err instanceof NhlShapeError) throw err;
             }
           }
           result.values.HIT = hits;
@@ -793,7 +798,9 @@ export default async function NhlSyncPage({
           verified against a live response at all — if the pool import above reports errors for
           every team, this shows the real JSON for one team so the parser in{" "}
           <code className="text-white">lib/nhl.ts</code>&apos;s <code className="text-white">getTeamRoster</code>{" "}
-          can be fixed to match.
+          can be fixed to match. A team parsing to zero players now fails loudly (each team shows
+          up in the import&apos;s error list) instead of silently importing nothing for it, so a
+          shape break here is impossible to miss.
         </p>
         {debugRosterError && <HighlightBox title="Couldn't fetch">{debugRosterError}</HighlightBox>}
         <form action={debugRosterPreview} className="mb-3 flex flex-wrap gap-3">
@@ -820,11 +827,15 @@ export default async function NhlSyncPage({
       <SectionCard title="Debug: preview a raw NHL boxscore response">
         <p className="mb-3 text-sm text-cream/70">
           Hits/Blocked Shots come from this endpoint — also unverified against a live response.
-          If they&apos;re still showing 0 after a sync, type a real NHL game ID here (find one in
-          the game-log debug box below — each game entry has a{" "}
-          <code className="text-white">gameId</code>) to see the real JSON, and the field names in{" "}
-          <code className="text-white">lib/nhl.ts</code>&apos;s <code className="text-white">getGameHitsAndBlocks</code>
-          /<code className="text-white">extractBoxscoreSkaters</code> are the ones to fix if they differ.
+          A game that parses to zero skaters now fails loudly instead of silently leaving
+          Hits/Blocked Shots at 0 for everyone in it — if a sync run comes back with a wall of
+          errors mentioning &quot;no skaters under playerByGameStats,&quot; that&apos;s this. Type
+          a real NHL game ID here (find one in the game-log debug box below — each game entry has
+          a <code className="text-white">gameId</code>) to see the real JSON, and the field names
+          in <code className="text-white">lib/nhl.ts</code>&apos;s{" "}
+          <code className="text-white">getGameHitsAndBlocks</code>/
+          <code className="text-white">extractBoxscoreSkaters</code> are the ones to fix if they
+          differ.
         </p>
         {debugBoxError && <HighlightBox title="Couldn't fetch">{debugBoxError}</HighlightBox>}
         <form action={debugBoxscorePreview} className="mb-3 flex flex-wrap gap-3">
