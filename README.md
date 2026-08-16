@@ -322,40 +322,50 @@ G/A/PPP/SHP/SOG/HIT/BLK/PIM for skaters, W/SV/GA/SO for goalies) come from
 `/admin/nhl-sync` (re-run roughly monthly — a plain recompute-and-overwrite,
 safe any time). This is intentionally not a per-game number:
 
-- **Per-category 0–100 scores**: each category's blended per-game average
-  (below) is standardized against a hand-calibrated baseline/stdDev for
-  that specific category (`FORWARD_CATEGORY_CALIBRATION` /
-  `DEFENSE_CATEGORY_CALIBRATION` / `GOALIE_CATEGORY_CALIBRATION` in
-  `lib/playerRating.ts`) — separate constants from the per-game valuation
-  model further down. Forwards and defensemen use different offensive
-  baselines (a defenseman scoring/assisting at a good rate *for a
-  defenseman* was landing below a baseline calibrated off forward
-  production, unfairly dragging every D's card down) — goalies get their
-  own table entirely. The 0–100 mapping itself (`categoryScore`) is also
-  its own curve, not `standardizeRating` — anchored at 68 rather than 50,
-  and asymmetric: performance above baseline climbs faster per standard
-  deviation (11 pts) than performance below baseline falls (7 pts). A
-  symmetric 50-centered curve read as too flat/low for a HUT/FUT-style
-  card — "replacement level for a rostered player" should read like a
-  generic silver card in the 60s, not a 50, and a genuine star should be
-  able to break into the 90s.
+- **Per-category 0–100 scores are percentiles, not a hand-picked
+  baseline.** Earlier versions standardized each category against a
+  constant someone guessed from general hockey knowledge (a "typical"
+  per-game rate) — which meant the score was only ever as good as that
+  guess, and every round of "these numbers don't look right" feedback was
+  really "the guess was wrong" in disguise. `percentileCategoryScores` in
+  `lib/playerRating.ts` replaced that entirely: every active-roster
+  player's blended per-game average (see below) in a category is ranked
+  against every *other* rostered player at the same position group
+  (forward / defense / goalie), and that rank becomes the score (40 for
+  the group's worst, 99 for its best, linear in between). Nothing here is
+  invented — a player's G score is purely a function of how their real
+  synced NHL goal rate compares to their real teammates' and opponents'
+  real synced goal rates. It also means the score self-calibrates to
+  whatever this specific league's actual talent pool looks like, rather
+  than needing to guess in advance whether a league is stacked with stars
+  or has a lot of replacement-level bench players.
+- **Needs the whole roster at once.** A percentile is meaningless against
+  a population of one, so "Update season card scores" computes every
+  rostered player's blended per-game averages first (`playerInputs`), then
+  calls `percentileCategoryScores` once against all of them, then writes
+  every row — unlike the old per-player-in-isolation approach.
+- **A category with no real data** (see below) gets a neutral 50 for just
+  that one category rather than being ranked with a fabricated value — not
+  excluded from the card, not a fabricated top/bottom rank.
 - **Overall**: a weighted average of those category scores, weighted
   differently by position (`FORWARD_EMPHASIS` / `DEFENSE_EMPHASIS` /
   `GOALIE_EMPHASIS`) — defensemen weight HIT/BLK/PIM more heavily than
   forwards do; forwards weight G/A/PPP more heavily.
 - **Blended, not replaced**: starts as last season's rating at the
   beginning of this season and shifts toward this season's actual
-  performance as the year goes on. `seasonBlendWeight` derives that blend
-  purely from today's date vs. October 1 of the season's start year
-  (ramping 0→1 over ~7 months) rather than from how many times the button's
-  been clicked, so re-running the update any time is always correct for
+  performance as the year goes on (`blendedCategoryAverages` /
+  `blendedPerGameAverage`). `seasonBlendWeight` derives that blend purely
+  from today's date vs. October 1 of the season's start year (ramping 0→1
+  over ~7 months) rather than from how many times the button's been
+  clicked, so re-running the update any time is always correct for
   wherever the calendar actually is.
 - **HIT/BLK have no real last-season baseline**: getting those from a
   player's entire prior season would mean a boxscore call per game per
-  rostered player — too expensive for an admin button — so the blend falls
-  back to that category's own baseline (a neutral ~50) instead of a
-  fabricated, punishing zero. Same fallback covers a true rookie with no
-  last-season data at all (`blendedSeasonScores`'s doc comment in
+  rostered player — too expensive for an admin button — so a player with
+  no real last-season HIT/BLK (and no this-season data yet either) simply
+  has no average for that category (`null`) rather than a fabricated,
+  punishing zero. Same fallback covers a true rookie with no last-season
+  data at all (`blendedPerGameAverage`'s doc comment in
   `lib/playerRating.ts` has the full reasoning).
 - **Card colors** match the player's real NHL team
   (`Player.nhlTeamAbbrev`, hand-maintained in `lib/nhlTeamColors.ts`) —

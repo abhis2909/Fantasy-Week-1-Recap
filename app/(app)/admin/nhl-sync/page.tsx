@@ -27,7 +27,13 @@ import {
 } from "@/lib/nhl";
 import { isLegacyFictionalName } from "@/lib/depthPlayerNames";
 import { renameLegacyFictionalPlayers } from "@/lib/playerCleanup";
-import { sumGameLogValues, blendedSeasonScores, seasonBlendWeight } from "@/lib/playerRating";
+import {
+  sumGameLogValues,
+  blendedCategoryAverages,
+  percentileCategoryScores,
+  seasonBlendWeight,
+  type PlayerCategoryInputs,
+} from "@/lib/playerRating";
 
 // Bulk-syncing a whole roster against an external API can run long — each
 // skater now needs one game-log request plus one boxscore request per
@@ -371,10 +377,14 @@ export default async function NhlSyncPage({
     const lastSeasonId = `${season.year - 1}${season.year}`;
     const currentWeight = seasonBlendWeight(new Date(), season.year);
 
-    let updated = 0;
     const skipped: string[] = [];
     const errored: string[] = [];
 
+    // Phase 1: gather every player's blended per-game averages (real NHL
+    // data only — no hand-guessed constants anywhere in this). Percentile
+    // scoring below needs the *whole* roster's averages before it can rank
+    // anyone, so nothing gets scored or written to the DB in this phase.
+    //
     // Lower concurrency than the other sync actions on this page (3 vs 6)
     // — this one can fire up to two NHL requests per player (a search match
     // for anyone not yet NHL-linked, plus the last-season game log for
@@ -383,6 +393,7 @@ export default async function NhlSyncPage({
     // 429'd. lib/nhl.ts's fetchNhl already retries 429s with backoff, but
     // that's a second line of defense — better to not lean on it this hard
     // in the first place.
+    const playerInputs: PlayerCategoryInputs[] = [];
     await mapWithConcurrency(activeRoster, 3, async (entry) => {
       const player = entry.player;
       try {
@@ -410,9 +421,9 @@ export default async function NhlSyncPage({
         // dropped: getting real per-game hits/blocks needs a boxscore call
         // per game (see lib/nhl.ts), and doing that for a whole prior
         // season across a full roster is too expensive for an admin
-        // button — blendedSeasonScores falls back to each category's
-        // baseline for exactly this case rather than wrongly treating it
-        // as a real zero.
+        // button — blendedCategoryAverages falls back to null (no data)
+        // for exactly this case rather than wrongly treating it as a real
+        // zero.
         //
         // A rostered player having *no* last-season NHL record at all is
         // common, not exceptional — rookies, recent call-ups, anyone who
@@ -421,8 +432,8 @@ export default async function NhlSyncPage({
         // real failure, so it's caught here specifically (unlike the outer
         // try/catch, which should still fail this player loudly for a
         // genuine problem): treat it as "no last-season data," which
-        // blendedSeasonScores already knows how to fall back from, instead
-        // of aborting this player's whole update over it.
+        // blendedCategoryAverages already knows how to fall back from,
+        // instead of aborting this player's whole update over it.
         let lastSeasonTotals: Record<string, number> = {};
         let lastSeasonGameCount = 0;
         try {
@@ -434,9 +445,9 @@ export default async function NhlSyncPage({
           lastSeasonTotals = sumGameLogValues(lastSeasonPerGame);
           lastSeasonGameCount = lastSeasonPerGame.length;
         } catch {
-          // No last-season data available — fine, blendedSeasonScores
-          // falls back to each category's baseline for a player with 0
-          // last-season games.
+          // No last-season data available — fine, blendedCategoryAverages
+          // falls back to null (no data) for a player with 0 last-season
+          // games.
         }
         if (player.primaryPosition !== "G") {
           delete lastSeasonTotals.HIT;
@@ -450,7 +461,7 @@ export default async function NhlSyncPage({
         const thisSeasonGameLogs = await prisma.playerGameLog.findMany({ where: { playerId: player.id } });
         const thisSeasonTotals = sumGameLogValues(thisSeasonGameLogs);
 
-        const { categoryScores, overall } = blendedSeasonScores(
+        const averages = blendedCategoryAverages(
           lastSeasonTotals,
           lastSeasonGameCount,
           thisSeasonTotals,
@@ -458,17 +469,28 @@ export default async function NhlSyncPage({
           player.primaryPosition,
           currentWeight
         );
-
-        await prisma.playerSeasonRating.upsert({
-          where: { playerId: player.id },
-          create: { playerId: player.id, overall, categoryScores, currentSeasonWeight: currentWeight },
-          update: { overall, categoryScores, currentSeasonWeight: currentWeight },
-        });
-        updated++;
+        playerInputs.push({ playerId: player.id, position: player.primaryPosition, averages });
       } catch (err) {
         errored.push(`${player.fullName} (${err instanceof Error ? err.message : "unknown error"})`);
       }
     });
+
+    // Phase 2: rank every gathered player's averages against their position
+    // group (forward/defense/goalie) into 0-100 percentile scores, then
+    // write them all — this is the only place PlayerSeasonRating actually
+    // gets upserted, so a player who errored in phase 1 above correctly
+    // never gets a (possibly stale) row touched this run.
+    const scoresByPlayer = percentileCategoryScores(playerInputs);
+    let updated = 0;
+    for (const { playerId } of playerInputs) {
+      const { categoryScores, overall } = scoresByPlayer.get(playerId)!;
+      await prisma.playerSeasonRating.upsert({
+        where: { playerId },
+        create: { playerId, overall, categoryScores, currentSeasonWeight: currentWeight },
+        update: { overall, categoryScores, currentSeasonWeight: currentWeight },
+      });
+      updated++;
+    }
 
     revalidatePath("/admin/nhl-sync");
     revalidatePath("/players");
@@ -765,12 +787,15 @@ export default async function NhlSyncPage({
         <p className="mb-3 text-cream/80">
           {seasonRatingCount} of {players.length} players have a card score. This is the
           &quot;Ultimate Team&quot;-style overall + per-category rating shown on player cards —
-          separate from the per-game ratings above. It starts as last season&apos;s rating and
-          blends toward this season&apos;s actual performance as the season progresses (currently{" "}
-          {Math.round(seasonBlendWeight(new Date(), season.year) * 100)}% this season, the rest
-          last season). Requires last season&apos;s game log, so it makes one extra NHL request
-          per rostered player on top of whatever &quot;Sync full season game logs&quot; already
-          did.
+          separate from the per-game ratings above. Each category score is a percentile: every
+          rostered player&apos;s real per-game average in that category, blended from last season
+          and this season (currently {Math.round(seasonBlendWeight(new Date(), season.year) * 100)}
+          % this season, the rest last season), ranked against every other rostered player at the
+          same position group. No hand-picked baseline involved — it&apos;s entirely a function of
+          what the NHL API actually returned for this roster, so it re-calibrates itself to
+          whatever this league&apos;s real talent spread looks like. Requires last season&apos;s
+          game log, so it makes one extra NHL request per rostered player on top of whatever
+          &quot;Sync full season game logs&quot; already did.
         </p>
         <p className="mb-4 rounded-lg border border-gold/40 bg-gold/10 px-3 py-2 text-sm text-gold">
           <strong>This is a separate step from syncing stats above.</strong> Running &quot;Sync
